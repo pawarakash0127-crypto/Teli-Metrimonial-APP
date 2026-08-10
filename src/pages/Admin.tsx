@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { db, collection, getDocs, doc, updateDoc, setDoc, deleteDoc, query, where, onSnapshot } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { CheckCircle, XCircle, Clock, User, Database, Star, Edit, Trash2, ShieldCheck, UserPlus, Search, RefreshCw, BarChart2, KeyRound } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, User, Database, Star, Edit, Trash2, ShieldCheck, UserPlus, Search, RefreshCw, BarChart2, KeyRound, Mail } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import FloatingToast, { ToastMessage } from '../components/FloatingToast';
 import { seedSampleProfilesToFirestore, SAMPLE_ACCOUNTS } from '../lib/seedProfiles';
 import AdminUpdateUserCredentialsModal from '../components/AdminUpdateUserCredentialsModal';
+import WelcomeEmailPreviewModal from '../components/WelcomeEmailPreviewModal';
 import { sendAccountNotification } from '../lib/notificationUtils';
 
 interface ProfileData {
@@ -59,6 +60,9 @@ export default function Admin() {
   // Edit user credentials modal state
   const [selectedUserForCredentials, setSelectedUserForCredentials] = useState<any | null>(null);
   const [credentialsModalOpen, setCredentialsModalOpen] = useState(false);
+
+  // Welcome Email Preview modal state
+  const [emailModalOpen, setEmailModalOpen] = useState(false);
 
   // Non-blocking Modals state for Deletion & Rejection actions
   const [rejectingProfile, setRejectingProfile] = useState<ProfileData | null>(null);
@@ -406,6 +410,13 @@ export default function Admin() {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
+          <button 
+            onClick={() => setEmailModalOpen(true)}
+            className="flex items-center gap-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 px-4 py-2 rounded-xl text-sm font-bold transition-all border border-amber-400/30"
+          >
+            <Mail className="h-4 w-4 text-amber-300" />
+            Welcome Email Preview
+          </button>
           <button 
             onClick={fetchAdminData}
             className="flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-xl text-sm font-semibold transition-all backdrop-blur-sm border border-white/10"
@@ -1211,6 +1222,12 @@ export default function Admin() {
           </div>
         </div>
       )}
+
+      {/* Welcome Email Preview Modal */}
+      <WelcomeEmailPreviewModal
+        isOpen={emailModalOpen}
+        onClose={() => setEmailModalOpen(false)}
+      />
     </div>
   );
 }

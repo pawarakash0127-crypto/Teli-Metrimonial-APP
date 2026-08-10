@@ -5,6 +5,7 @@ import { Mail, Phone, CheckCircle } from 'lucide-react';
 import FloatingToast from '../components/FloatingToast';
 import { validateAndFormatPhone } from '../lib/phoneUtils';
 import { sendAccountNotification } from '../lib/notificationUtils';
+import { triggerWelcomeEmail } from '../lib/welcomeEmail';
 
 declare global {
   interface Window {
@@ -133,6 +134,14 @@ export default function Register() {
 
       await saveProfileToFirestore(user.uid, user.email || '', user.phoneNumber || '');
 
+      // Trigger welcome email after profile creation succeeds
+      triggerWelcomeEmail({
+        uid: user.uid,
+        email: user.email || '',
+        userName: `${gFirstName} ${gLastName}`,
+        registrationDateISO: new Date().toISOString()
+      }).catch(err => console.warn("Welcome email trigger warning:", err));
+
       const notif = sendAccountNotification('creation', {
         userName: `${gFirstName} ${gLastName}`,
         email: user.email || '',
@@ -167,6 +176,14 @@ export default function Register() {
       setLoading(true);
       const res = await createUserWithEmailAndPassword(auth, email, password);
       await saveProfileToFirestore(res.user.uid, email, '');
+
+      // Trigger welcome email after profile creation succeeds
+      triggerWelcomeEmail({
+        uid: res.user.uid,
+        email,
+        userName: `${firstName} ${lastName}`,
+        registrationDateISO: new Date().toISOString()
+      }).catch(err => console.warn("Welcome email trigger warning:", err));
 
       const notif = sendAccountNotification('creation', {
         userName: `${firstName} ${lastName}`,
@@ -232,6 +249,12 @@ export default function Register() {
       setLoading(true);
       const res = await window.confirmationResult.confirm(otp);
       await saveProfileToFirestore(res.user.uid, '', phone);
+
+      // Trigger welcome email check (will gracefully skip if phone-only)
+      triggerWelcomeEmail({
+        uid: res.user.uid,
+        userName: `${firstName} ${lastName}`
+      }).catch(err => console.warn("Welcome email trigger warning:", err));
 
       const notif = sendAccountNotification('creation', {
         userName: `${firstName} ${lastName}`,

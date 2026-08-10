@@ -7,6 +7,7 @@ import FloatingToast from '../components/FloatingToast';
 import ForgotPasswordModal from '../components/ForgotPasswordModal';
 import { SAMPLE_ACCOUNTS } from '../lib/seedProfiles';
 import { useTranslation } from 'react-i18next';
+import { triggerWelcomeEmail } from '../lib/welcomeEmail';
 
 declare global {
   interface Window {
@@ -132,6 +133,12 @@ export default function Login() {
             status: profileData.status || 'approved',
             createdAt: profileData.createdAt || new Date().toISOString()
           });
+
+          triggerWelcomeEmail({
+            uid: newUid,
+            email: targetEmail,
+            userName: `${profileData.firstName || ''} ${profileData.lastName || ''}`.trim() || 'Member'
+          }).catch(e => console.warn("Auto-provision welcome email warning:", e));
 
           await checkArchivedOrAdminAndNavigate(newUid, from);
           return;
