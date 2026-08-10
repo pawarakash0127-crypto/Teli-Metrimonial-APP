@@ -1,0 +1,35 @@
+@import "tailwindcss";
+
+@theme {
+  --color-saffron: #FF9933;
+  --color-gold: #FFD700;
+  --color-maroon: #800000;
+  --font-serif: "Playfair Display", serif;
+}
+
+@layer base {
+  body {
+    @apply bg-stone-50 text-stone-900;
+  }
+}
+
+@layer utilities {
+  .bg-traditional-pattern {
+    background-image: url('https://www.transparenttextures.com/patterns/mandala.png');
+    background-repeat: repeat;
+  }
+  
+  .bg-baarat-overlay {
+    background-image: linear-gradient(rgba(255, 153, 51, 0.7), rgba(255, 255, 255, 0.8)), url('https://images.unsplash.com/photo-1519225421980-715cb0215aed?auto=format&fit=crop&q=80&w=1920');
+    background-size: cover;
+    background-position: center;
+  }
+
+  .text-gradient-saffron {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-saffron to-maroon;
+  }
+
+  .border-traditional {
+    border-image: linear-gradient(to right, #FF9933, #FFD700, #FF9933) 1;
+  }
+}

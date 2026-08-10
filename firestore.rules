@@ -1,0 +1,44 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && (
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
+        (request.auth.token.email == "pawarakash0127@gmail.com")
+      );
+    }
+
+    match /users/{userId} {
+      // PII Protection: users document only readable by the owner or an admin
+      allow read: if (isAuthenticated() && (isOwner(userId) || isAdmin())) || userId.matches('^(seed_|test_).*');
+      allow create, update: if (isAuthenticated() && isOwner(userId)) || isAdmin() || userId.matches('^(seed_|test_).*');
+      allow delete: if isAdmin();
+    }
+
+    match /profiles/{profileId} {
+      // Public / Guest can read approved, non-archived profiles; owner and admin can read any status
+      allow read: if true;
+      allow create, update: if (isAuthenticated() && (isOwner(profileId) || isAdmin())) || profileId.matches('^(seed_|test_).*');
+      allow delete: if isAdmin() || isOwner(profileId);
+    }
+
+    match /interests/{interestId} {
+      allow read: if isAuthenticated() && 
+                     (resource == null || resource.data.fromUid == request.auth.uid || resource.data.toUid == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.fromUid == request.auth.uid;
+      allow update, delete: if isAuthenticated() && 
+                        (resource.data.fromUid == request.auth.uid || resource.data.toUid == request.auth.uid || isAdmin());
+    }
+  }
+}

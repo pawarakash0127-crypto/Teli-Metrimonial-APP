@@ -1,0 +1,198 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A registered user of the matrimonial platform.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "The unique identifier of the user (matches Firebase Auth UID)."
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "The user's email address."
+        },
+        "phoneNumber": {
+          "type": "string",
+          "description": "The user's phone number."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["user", "admin"],
+          "description": "The role of the user."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when the user was created."
+        }
+      },
+      "required": ["uid", "role", "createdAt"]
+    },
+    "Profile": {
+      "title": "Profile",
+      "description": "A matrimonial profile containing personal, professional, and family details.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "The unique identifier of the user who owns this profile."
+        },
+        "firstName": {
+          "type": "string",
+          "description": "First name of the candidate."
+        },
+        "lastName": {
+          "type": "string",
+          "description": "Last name of the candidate."
+        },
+        "gender": {
+          "type": "string",
+          "enum": ["Male", "Female"],
+          "description": "Gender of the candidate."
+        },
+        "dob": {
+          "type": "string",
+          "format": "date",
+          "description": "Date of birth (YYYY-MM-DD)."
+        },
+        "age": {
+          "type": "number",
+          "description": "Age of the candidate."
+        },
+        "height": {
+          "type": "string",
+          "description": "Height of the candidate (e.g., 5'8\")."
+        },
+        "education": {
+          "type": "string",
+          "description": "Highest education qualification."
+        },
+        "profession": {
+          "type": "string",
+          "description": "Current profession or job title."
+        },
+        "income": {
+          "type": "string",
+          "description": "Annual income range."
+        },
+        "location": {
+          "type": "string",
+          "description": "Current city of residence."
+        },
+        "nativePlace": {
+          "type": "string",
+          "description": "Native place or hometown."
+        },
+        "gotraKul": {
+          "type": "string",
+          "description": "Gotra/Kul of the candidate."
+        },
+        "isManglik": {
+          "type": "string",
+          "enum": ["Yes", "No", "Don't Know", "Anshik (Partial)"],
+          "description": "Manglik status of the candidate."
+        },
+        "maritalStatus": {
+          "type": "string",
+          "enum": ["Never Married", "Divorced", "Widowed", "Awaiting Divorce"],
+          "description": "Marital status."
+        },
+        "timeOfBirth": { "type": "string", "description": "Time of birth" },
+        "birthplace": { "type": "string", "description": "Place of birth" },
+        "fatherName": { "type": "string", "description": "Father's name" },
+        "motherName": { "type": "string", "description": "Mother's name" },
+        "parentsHometown": { "type": "string", "description": "Parents' hometown" },
+        "address": { "type": "string", "description": "Address" },
+        "maternalUncleName": { "type": "string", "description": "Maternal uncle's name" },
+        "maternalUncleGotraKul": { "type": "string", "description": "Maternal uncle's Gotra/Kul" },
+        "maternalUnclePlace": { "type": "string", "description": "Maternal uncle's place" },
+        "maternalUnclePhone": { "type": "string", "description": "Maternal uncle's phone number" },
+        "parentsOccupation": { "type": "string", "description": "Parents' occupation" },
+        "parentsContact": { "type": "string", "description": "Parents' contact details" },
+        "contactNumber": { "type": "string", "description": "Contact number for marriage inquiries" },
+        "partnerExpectations": { "type": "string", "description": "Partner expectations" },
+        "siblings": {
+          "type": "string",
+          "description": "JSON stringified array of sibling objects"
+        },
+        "photoUrl": {
+          "type": "string",
+          "description": "URL to the profile photo."
+        },
+        "isFeatured": {
+          "type": "boolean",
+          "description": "Whether the profile is featured by admin."
+        },
+        "partnerPreferences": {
+          "type": "object",
+          "properties": {
+            "ageMin": { "type": "number" },
+            "ageMax": { "type": "number" },
+            "education": { "type": "string" },
+            "profession": { "type": "string" },
+            "location": { "type": "string" }
+          }
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "approved", "rejected"],
+          "description": "Approval status of the profile by admin."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "uid", "firstName", "lastName", "gender", "dob", "age", "height", 
+        "education", "profession", "income", "location", "nativePlace", 
+        "gotraKul", "maritalStatus", "status", "createdAt", "updatedAt"
+      ]
+    },
+    "Interest": {
+      "title": "Interest",
+      "description": "Represents an interest notification/expression sent from one user to another.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "fromUid": { "type": "string" },
+        "fromName": { "type": "string" },
+        "fromPhotoUrl": { "type": "string" },
+        "fromAge": { "type": "number" },
+        "fromProfession": { "type": "string" },
+        "fromLocation": { "type": "string" },
+        "toUid": { "type": "string" },
+        "toName": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "accepted", "declined"]
+        },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "read": { "type": "boolean" }
+      },
+      "required": ["id", "fromUid", "fromName", "toUid", "toName", "status", "createdAt", "updatedAt", "read"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Stores user accounts and roles."
+    },
+    "profiles/{profileId}": {
+      "schema": { "$ref": "#/entities/Profile" },
+      "description": "Stores matrimonial profiles."
+    },
+    "interests/{interestId}": {
+      "schema": { "$ref": "#/entities/Interest" },
+      "description": "Stores interest expressions and notifications between users."
+    }
+  }
+}
