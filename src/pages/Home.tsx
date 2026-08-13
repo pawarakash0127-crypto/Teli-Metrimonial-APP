@@ -11,6 +11,7 @@ import { seedSampleProfilesToFirestore } from '../lib/seedProfiles';
 import { getOrAssignProfileId, getDisplayProfileId } from '../lib/profileIdUtils';
 import { COMMUNITY_NEWS, NewsItem } from '../data/communityNewsData';
 import logoImg from '../assets/images/LOGO.jpg';
+import hertgImg from '../assets/images/heritage_values_image_1786359545319.jpg';
 
 interface ProfileData {
   uid: string;
@@ -640,7 +641,7 @@ export default function Home() {
             <div className="order-1 md:order-2 relative">
               <div className="aspect-square rounded-3xl overflow-hidden shadow-2xl border-4 border-gold/30 bg-white">
                 <img 
-                  src="src/assets/images/heritage_values_image_1786359545319.jpg" 
+                  src={hertgImg}
                   alt="Tel Ghana - Traditional Oil Press & Heritage" 
                   className="w-full h-full object-contain p-2"
                   referrerPolicy="no-referrer"

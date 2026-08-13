@@ -2,6 +2,7 @@ import React from 'react';
 import { Heart, ShieldCheck, Users, Award, BookOpen, Sparkles } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import logoImg from '../assets/images/LOGO.jpg';
+import sant from '../assets/images/Shri_Sant_Santaji_Jagnade_Maharaj_with_teli.jpg';
 
 export default function AboutUs() {
   return (
@@ -46,7 +47,7 @@ export default function AboutUs() {
           <div className="relative">
             <div className="aspect-square rounded-2xl overflow-hidden shadow-xl border-4 border-saffron/30 bg-stone-100 p-2">
               <img
-                src="src/assets/images/Shri_Sant_Santaji_Jagnade_Maharaj_with_teli.jpg"
+                src={sant}
                 alt="Tel Ghana - Heritage and Values"
                 referrerPolicy="no-referrer"
                 className="w-full h-full object-contain bg-white rounded-xl"
