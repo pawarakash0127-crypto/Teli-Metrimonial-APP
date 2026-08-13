@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
-import { auth, googleProvider, signInWithPopup, createUserWithEmailAndPassword, RecaptchaVerifier, signInWithPhoneNumber, db, doc, setDoc, getDoc } from '../lib/firebase';
+import { auth, googleProvider, signInWithPopup, createUserWithEmailAndPassword, RecaptchaVerifier, signInWithPhoneNumber, db, doc, setDoc, getDoc, collection, addDoc, query, where, getDocs } from '../lib/firebase';
 import { Mail, Phone, CheckCircle } from 'lucide-react';
 import FloatingToast from '../components/FloatingToast';
 import { validateAndFormatPhone } from '../lib/phoneUtils';
 import { sendAccountNotification } from '../lib/notificationUtils';
 import { triggerWelcomeEmail } from '../lib/welcomeEmail';
+import { capitalizeWords } from '../lib/capitalizationUtils';
+import { assignGlobalProfileIdInTransaction } from '../lib/profileIdUtils';
+import logoImg from '../assets/images/LOGO.jpg';
 
 declare global {
   interface Window {
@@ -34,8 +37,6 @@ export default function Register() {
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
 
-  const from = location.state?.from?.pathname || '/profile';
-
   // Calculate max date allowed for 18+ years
   const today = new Date();
   const maxDobDate = new Date(today.getFullYear() - 18, today.getMonth(), today.getDate()).toISOString().split('T')[0];
@@ -56,6 +57,28 @@ export default function Register() {
     return birthDate <= cutoff;
   };
 
+  const checkEmailOrPhoneUnique = async (emailToCheck?: string, phoneToCheck?: string): Promise<string | null> => {
+    try {
+      if (emailToCheck) {
+        const qEmail = query(collection(db, 'users'), where('email', '==', emailToCheck.toLowerCase().trim()));
+        const snap = await getDocs(qEmail);
+        if (!snap.empty) {
+          return 'An account with this email address already exists. Please login instead.';
+        }
+      }
+      if (phoneToCheck) {
+        const qPhone = query(collection(db, 'users'), where('phoneNumber', '==', phoneToCheck.trim()));
+        const snap = await getDocs(qPhone);
+        if (!snap.empty) {
+          return 'An account with this phone number already exists. Please login instead.';
+        }
+      }
+    } catch (err) {
+      console.warn("Notice checking account uniqueness in Firestore:", err);
+    }
+    return null;
+  };
+
   const saveProfileToFirestore = async (uid: string, userEmail: string, userPhone: string) => {
     const calculatedAge = dob ? (new Date().getFullYear() - new Date(dob).getFullYear()) : 25;
     const profileRef = doc(db, 'profiles', uid);
@@ -64,59 +87,94 @@ export default function Register() {
     const docSnap = await getDoc(profileRef);
     const existingData = docSnap.exists() ? docSnap.data() : {};
 
-    const birthYear = dob ? parseInt(dob.slice(0, 4)) : 1998;
-    const prefBirthYear = gender === 'Male' ? (birthYear - 3) : (birthYear - 5);
+    const cleanPhoneDigits = userPhone ? userPhone.replace(/[^\d]/g, '') : '';
+    const normPhone = cleanPhoneDigits.length >= 10 ? cleanPhoneDigits.slice(-10) : cleanPhoneDigits;
+
+    const capFirstName = capitalizeWords(firstName.trim() || existingData.firstName || (userEmail ? userEmail.split('@')[0] : 'User'));
+    const capLastName = capitalizeWords(lastName.trim() || existingData.lastName || 'Member');
 
     const profileData: any = {
       uid,
-      firstName: firstName.trim() || existingData.firstName || (userEmail ? userEmail.split('@')[0] : 'User'),
-      lastName: lastName.trim() || existingData.lastName || 'Member',
+      firstName: capFirstName,
+      lastName: capLastName,
       gender: gender || existingData.gender || 'Male',
-      dob: dob || existingData.dob || '1998-01-01',
-      age: calculatedAge >= 18 ? calculatedAge : (existingData.age || 25),
-      email: userEmail || existingData.email || '',
-      contactNumber: userPhone || existingData.contactNumber || '',
+      dob: dob || existingData.dob || '',
+      age: calculatedAge >= 18 ? calculatedAge : (existingData.age || 0),
+      email: (userEmail || existingData.email || '').toLowerCase().trim(),
+      contactNumber: normPhone || existingData.contactNumber || '',
       updatedAt: new Date().toISOString()
     };
 
-    if (!docSnap.exists()) {
-      profileData.status = 'approved';
-      profileData.maritalStatus = 'Never Married';
-      profileData.height = '5.6 ft';
-      profileData.caste = 'Teli';
-      profileData.subCaste = 'Tillori Teli';
-      profileData.gotraKul = 'Kashyap';
-      profileData.nativePlace = 'Nashik';
-      profileData.education = 'Graduate';
-      profileData.profession = 'Professional';
-      profileData.company = 'Nashik Business';
-      profileData.income = '6-8 Lakhs P.A.';
-      profileData.location = 'Nashik, Maharashtra';
-      profileData.about = 'Respected member of Nashik Teli Samaj.';
-      profileData.parentsContact = userPhone || '';
-      profileData.photoUrl = (gender || 'Male') === 'Female' 
-        ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=600'
-        : 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=600';
+    if (!docSnap.exists() || !existingData.profileId) {
+      try {
+        const assignedId = await assignGlobalProfileIdInTransaction(profileData.gender);
+        profileData.profileId = assignedId;
+        profileData.vaduVarNumber = assignedId;
+      } catch (err) {
+        console.warn("Error calculating profileId during registration:", err);
+        const prefix = profileData.gender === 'Female' ? 'VADHU' : 'VAR';
+        profileData.profileId = `${prefix}-001`;
+        profileData.vaduVarNumber = profileData.profileId;
+      }
+
+      profileData.status = 'pending';
+      profileData.maritalStatus = '';
+      profileData.height = '';
+      profileData.gotraKul = '';
+      profileData.nativePlace = '';
+      profileData.location = '';
+      profileData.education = '';
+      profileData.highestEducation = '';
+      profileData.profession = '';
+      profileData.companyName = '';
+      profileData.income = '';
+      profileData.fatherName = '';
+      profileData.motherName = '';
+      profileData.parentsHometown = '';
+      profileData.address = '';
+      profileData.contactNumber = normPhone || userPhone || existingData.contactNumber || '';
+      profileData.parentsContact = normPhone || userPhone || existingData.parentsContact || '';
+      profileData.photoUrl = ''; // Clean start, no auto photo
+      profileData.additionalPhotos = [];
       profileData.createdAt = new Date().toISOString();
+      profileData.isEmailVerified = Boolean(userEmail);
+      profileData.isPhoneVerified = Boolean(userPhone);
       profileData.partnerPreferences = {
-        preferredBirthYear: prefBirthYear > 1950 ? prefBirthYear : 1995,
-        education: 'Graduate / Any',
-        location: 'Maharashtra / Any'
+        preferredBirthYear: '',
+        education: '',
+        location: ''
       };
-    } else {
-      if (!existingData.gotraKul && existingData.gothram) {
-        profileData.gotraKul = existingData.gothram;
-      } else if (!existingData.gotraKul) {
-        profileData.gotraKul = 'Kashyap';
+
+      // Create Admin Notification for new profile registration
+      try {
+        const isFemale = profileData.gender === 'Female' || profileData.gender === 'female' || profileData.gender === 'bride' || profileData.gender === 'vadhu';
+        const categoryLabel = isFemale ? 'Vadhu' : 'Var';
+        const regMethod = userPhone ? 'Phone' : userEmail ? 'Email' : 'Google';
+
+        await addDoc(collection(db, 'admin_notifications'), {
+          type: 'new_registration',
+          userName: `${capFirstName} ${capLastName}`.trim(),
+          gender: profileData.gender,
+          category: categoryLabel,
+          profileId: profileData.profileId,
+          registrationMethod: regMethod,
+          createdAt: new Date().toISOString(),
+          uid,
+          read: false
+        });
+      } catch (notifErr) {
+        console.warn("Could not record admin notification:", notifErr);
       }
     }
 
     await setDoc(profileRef, profileData, { merge: true });
     await setDoc(userRef, {
       uid,
-      email: userEmail || existingData.email || '',
+      email: (userEmail || existingData.email || '').toLowerCase().trim(),
       phoneNumber: userPhone || existingData.phoneNumber || '',
       role: existingData.role || 'user',
+      vaduVarNumber: profileData.vaduVarNumber || profileData.profileId || '',
+      profileId: profileData.profileId || profileData.vaduVarNumber || '',
       createdAt: existingData.createdAt || new Date().toISOString()
     }, { merge: true });
   };
@@ -129,12 +187,11 @@ export default function Register() {
       const user = res.user;
       
       const displayNameParts = (user.displayName || 'Nashik Member').split(' ');
-      const gFirstName = firstName || displayNameParts[0] || 'User';
-      const gLastName = lastName || displayNameParts.slice(1).join(' ') || 'Member';
+      const gFirstName = capitalizeWords(firstName || displayNameParts[0] || 'User');
+      const gLastName = capitalizeWords(lastName || displayNameParts.slice(1).join(' ') || 'Member');
 
       await saveProfileToFirestore(user.uid, user.email || '', user.phoneNumber || '');
 
-      // Trigger welcome email after profile creation succeeds
       triggerWelcomeEmail({
         uid: user.uid,
         email: user.email || '',
@@ -150,8 +207,8 @@ export default function Register() {
       setSuccessMsg(notif.message);
 
       setTimeout(() => {
-        navigate(from, { replace: true });
-      }, 1500);
+        navigate('/profile', { replace: true });
+      }, 1000);
     } catch (err: any) {
       setError(err.message || 'Failed to create account with Google');
     } finally {
@@ -174,27 +231,34 @@ export default function Register() {
     try {
       setError('');
       setLoading(true);
+
+      const uniqueErr = await checkEmailOrPhoneUnique(email, undefined);
+      if (uniqueErr) {
+        setError(uniqueErr);
+        setLoading(false);
+        return;
+      }
+
       const res = await createUserWithEmailAndPassword(auth, email, password);
       await saveProfileToFirestore(res.user.uid, email, '');
 
-      // Trigger welcome email after profile creation succeeds
       triggerWelcomeEmail({
         uid: res.user.uid,
         email,
-        userName: `${firstName} ${lastName}`,
+        userName: `${capitalizeWords(firstName)} ${capitalizeWords(lastName)}`,
         registrationDateISO: new Date().toISOString()
       }).catch(err => console.warn("Welcome email trigger warning:", err));
 
       const notif = sendAccountNotification('creation', {
-        userName: `${firstName} ${lastName}`,
+        userName: `${capitalizeWords(firstName)} ${capitalizeWords(lastName)}`,
         email,
         phone: ''
       });
       setSuccessMsg(notif.message);
 
       setTimeout(() => {
-        navigate(from, { replace: true, state: { firstName, lastName, dob, gender } });
-      }, 1500);
+        navigate('/profile', { replace: true });
+      }, 1000);
     } catch (err: any) {
       setError(err.message || 'Failed to create account with Email');
     } finally {
@@ -213,6 +277,14 @@ export default function Register() {
     try {
       setError('');
       setLoading(true);
+
+      const uniqueErr = await checkEmailOrPhoneUnique(undefined, phoneRes.formatted);
+      if (uniqueErr) {
+        setError(uniqueErr);
+        setLoading(false);
+        return;
+      }
+
       if (!window.recaptchaVerifier) {
         window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
           size: 'invisible'
@@ -250,22 +322,21 @@ export default function Register() {
       const res = await window.confirmationResult.confirm(otp);
       await saveProfileToFirestore(res.user.uid, '', phone);
 
-      // Trigger welcome email check (will gracefully skip if phone-only)
       triggerWelcomeEmail({
         uid: res.user.uid,
-        userName: `${firstName} ${lastName}`
+        userName: `${capitalizeWords(firstName)} ${capitalizeWords(lastName)}`
       }).catch(err => console.warn("Welcome email trigger warning:", err));
 
       const notif = sendAccountNotification('creation', {
-        userName: `${firstName} ${lastName}`,
+        userName: `${capitalizeWords(firstName)} ${capitalizeWords(lastName)}`,
         email: '',
         phone
       });
       setSuccessMsg(notif.message);
 
       setTimeout(() => {
-        navigate(from, { replace: true, state: { firstName, lastName, dob, gender } });
-      }, 1500);
+        navigate('/profile', { replace: true });
+      }, 1000);
     } catch (err: any) {
       setError(err.message || 'Invalid OTP');
     } finally {
@@ -275,14 +346,13 @@ export default function Register() {
 
   return (
     <div className="max-w-md mx-auto px-4 py-24">
-      {/* Floating Toast Notification */}
       <FloatingToast message={error ? { type: 'error', text: error } : null} onClose={() => setError('')} />
 
       <div className="bg-white p-8 rounded-3xl shadow-2xl border-2 border-saffron/10 relative overflow-hidden">
         <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-saffron via-gold to-saffron"></div>
         <div className="flex flex-col items-center mb-4">
           <img 
-            src="/logo.jpg" 
+            src={logoImg} 
             alt="राष्ट्रीय तेली समाज" 
             className="w-16 h-16 rounded-full object-cover border-2 border-saffron shadow-md bg-white p-0.5" 
           />
@@ -328,11 +398,11 @@ export default function Register() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-bold text-stone-700 mb-1.5 ml-1">First Name</label>
-                <input required type="text" value={firstName} onChange={e => setFirstName(e.target.value)} className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3.5 border transition-all" placeholder="First Name" />
+                <input required type="text" value={firstName} onChange={e => setFirstName(e.target.value)} className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3.5 border transition-all" placeholder="Akash" />
               </div>
               <div>
                 <label className="block text-sm font-bold text-stone-700 mb-1.5 ml-1">Last Name</label>
-                <input required type="text" value={lastName} onChange={e => setLastName(e.target.value)} className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3.5 border transition-all" placeholder="Last Name" />
+                <input required type="text" value={lastName} onChange={e => setLastName(e.target.value)} className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3.5 border transition-all" placeholder="Pawar" />
               </div>
             </div>
             <div>
@@ -363,9 +433,8 @@ export default function Register() {
               </div>
             </div>
             <div>
-              <label className="block text-sm font-bold text-stone-700 mb-1.5 ml-1">Date of Birth (18+ only)</label>
+              <label className="block text-sm font-bold text-stone-700 mb-1.5 ml-1">Date of Birth </label>
               <input required type="date" max={maxDobDate} value={dob} onChange={e => setDob(e.target.value)} className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3.5 border transition-all" />
-              <p className="text-xs text-stone-400 mt-1 ml-1 font-medium">Must be born on or before {maxDobDate} (18 years or older)</p>
             </div>
             <div>
               <label className="block text-sm font-bold text-stone-700 mb-1.5 ml-1">Email Address</label>
@@ -434,7 +503,7 @@ export default function Register() {
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-stone-700 mb-1.5 ml-1">Date of Birth (18+ only)</label>
+                  <label className="block text-sm font-bold text-stone-700 mb-1.5 ml-1">Date of Birth </label>
                   <input required type="date" max={maxDobDate} value={dob} onChange={e => setDob(e.target.value)} className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3.5 border transition-all" />
                   <p className="text-xs text-stone-400 mt-1 ml-1 font-medium">Must be born on or before {maxDobDate} (18 years or older)</p>
                 </div>

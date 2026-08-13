@@ -57,6 +57,8 @@ const termsMapMr: { [key: string]: string } = {
   'Female': 'स्त्री (वधू)',
   'Groom': 'वर',
   'Bride': 'वधू',
+  'Vadhu': 'वधू',
+  'Var': 'वर',
 
   // Professions
   'Software Engineer': 'सॉफ्टवेअर इंजिनिअर',
@@ -205,14 +207,68 @@ export function formatAgeDisplay(age: number | string | undefined, lang: string)
   return `${age} yrs`;
 }
 
-export function formatHeightDisplay(height: string | undefined, lang: string): string {
+export function formatHeightDisplay(height: string | undefined | null, lang: string = 'en'): string {
   if (!height) return '';
-  if (lang === 'mr') {
-    // Translate feet/inches notation if present
-    const devHeight = toDevanagariNumerals(height);
-    return devHeight.replace(/'/g, ' फूट ').replace(/"/g, ' इंच');
+  const str = String(height).trim();
+  if (!str) return '';
+
+  let feet = '';
+  let inches = '';
+
+  // Match e.g. 5'4, 5'4", 5.4, 5 4, 5ft 4in, 5ft 4inc, 5 feet 4 inches
+  const ftInMatch = str.match(/(\d+)\s*(?:'|ft|feet|\.)\s*(\d+)?\s*(?:"|in|inc|inches)?/i);
+  if (ftInMatch) {
+    feet = ftInMatch[1];
+    inches = ftInMatch[2] || '0';
+  } else {
+    // Check two digit string like 54 or 50
+    const twoDigit = str.match(/^([4-7])([0-1]?\d)$/);
+    if (twoDigit) {
+      feet = twoDigit[1];
+      inches = twoDigit[2];
+    }
   }
-  return height;
+
+  if (feet) {
+    if (lang === 'mr') {
+      const devFeet = toDevanagariNumerals(feet);
+      const devInches = toDevanagariNumerals(inches);
+      return `${devFeet} फूट ${devInches} इंच`;
+    }
+    return `${feet}ft ${inches}inc`;
+  }
+
+  if (lang === 'mr') {
+    return toDevanagariNumerals(str).replace(/'/g, ' फूट ').replace(/"/g, ' इंच');
+  }
+  return str;
+}
+
+export function formatHeightInput(val: string | undefined | null): string {
+  if (!val) return '';
+  const cleaned = String(val).trim();
+  if (!cleaned) return '';
+
+  // If already in 5'4 format
+  if (/^\d+'\d+"?$/.test(cleaned)) {
+    return cleaned.replace(/"/g, '');
+  }
+
+  // Handle 5.4, 5 4, 5-4, 5ft 4in, 5ft 4inc
+  const match = cleaned.match(/^(\d+)\s*[\.\s\-\,ft']\s*(\d+)?/i);
+  if (match) {
+    const feet = match[1];
+    const inches = match[2] || '0';
+    return `${feet}'${inches}`;
+  }
+
+  // Handle 54, 510, 60
+  const digitsMatch = cleaned.match(/^([4-7])(0|1[0-1]|[0-9])$/);
+  if (digitsMatch) {
+    return `${digitsMatch[1]}'${digitsMatch[2]}`;
+  }
+
+  return cleaned;
 }
 
 export function translateSiblingsList(siblingsInput: any, lang: string): any[] {

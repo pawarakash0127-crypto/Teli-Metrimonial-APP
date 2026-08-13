@@ -1,0 +1,50 @@
+{
+  "system": "Vadhu Var Matrimonial Platform",
+  "generatedAt": "2026-08-12",
+  "registrationFields": [
+    { "key": "firstName", "label": "First Name", "requirement": "Mandatory" },
+    { "key": "lastName", "label": "Last Name", "requirement": "Mandatory" },
+    { "key": "gender", "label": "Gender", "requirement": "Mandatory", "options": ["Male", "Female"] },
+    { "key": "dob", "label": "Date of Birth", "requirement": "Mandatory", "rule": "Must be 18+ years" },
+    { "key": "contactNumber", "label": "Contact Number", "requirement": "Mandatory", "rule": "10-digit mobile number" },
+    { "key": "email", "label": "Email Address", "requirement": "Mandatory" },
+    { "key": "password", "label": "Password", "requirement": "Mandatory" }
+  ],
+  "mandatoryProfileFields": [
+    { "key": "firstName", "label": "First Name", "requirement": "Mandatory" },
+    { "key": "lastName", "label": "Last Name", "requirement": "Mandatory" },
+    { "key": "gender", "label": "Gender", "requirement": "Mandatory" },
+    { "key": "dob", "label": "Date of Birth", "requirement": "Mandatory" },
+    { "key": "fatherName", "label": "Father's Name", "requirement": "Mandatory" },
+    { "key": "motherName", "label": "Mother's Name", "requirement": "Mandatory" },
+    { "key": "height", "label": "Height", "requirement": "Mandatory" },
+    { "key": "highestEducation", "label": "Highest Education Level", "requirement": "Mandatory" },
+    { "key": "profession", "label": "Profession", "requirement": "Mandatory" },
+    { "key": "location", "label": "Current Location", "requirement": "Mandatory" },
+    { "key": "nativePlace", "label": "Native Place", "requirement": "Mandatory" },
+    { "key": "gotraKul", "label": "Gotra / Kul", "requirement": "Mandatory" },
+    { "key": "maritalStatus", "label": "Marital Status", "requirement": "Mandatory", "options": ["Never Married", "Divorced", "Widowed", "Awaiting Divorce"] },
+    { "key": "contactNumber", "label": "Contact Number", "requirement": "Mandatory" }
+  ],
+  "kundaliGunaFields": [
+    { "key": "timeOfBirth", "label": "Time of Birth", "requirement": "Required for Kundali / Guna Milan" },
+    { "key": "birthplace", "label": "Place of Birth", "requirement": "Required for Kundali / Guna Milan" },
+    { "key": "isManglik", "label": "Manglik Status", "requirement": "Optional", "options": ["No", "Yes", "Don't Know", "Anshik"] }
+  ],
+  "optionalFields": [
+    { "key": "middleName", "label": "Middle Name" },
+    { "key": "degreeDetails", "label": "Degree / Specialization" },
+    { "key": "university", "label": "University / Institute" },
+    { "key": "companyName", "label": "Company Name" },
+    { "key": "income", "label": "Annual Income" },
+    { "key": "fatherOccupationCompany", "label": "Father's Occupation" },
+    { "key": "motherOccupationCompany", "label": "Mother's Occupation" },
+    { "key": "parentsHometown", "label": "Parents' Hometown" },
+    { "key": "parentsContact", "label": "Parents' Contact" },
+    { "key": "siblings", "label": "Sibling Details" },
+    { "key": "maternalUncle", "label": "Maternal Uncle Details" },
+    { "key": "address", "label": "Residential Address" },
+    { "key": "photos", "label": "Photos", "rule": "Max 3 photos (1 main + 2 additional)" },
+    { "key": "partnerPreferences", "label": "Partner Preferences" }
+  ]
+}

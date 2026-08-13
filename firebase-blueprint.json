@@ -179,6 +179,53 @@
         "read": { "type": "boolean" }
       },
       "required": ["id", "fromUid", "fromName", "toUid", "toName", "status", "createdAt", "updatedAt", "read"]
+    },
+    "Config": {
+      "title": "Config",
+      "description": "System and homepage settings configured by Admin.",
+      "type": "object",
+      "properties": {
+        "happyMarriagesEnabled": { "type": "boolean" },
+        "happyMarriagesTitle": { "type": "string" },
+        "happyMarriagesSubtitle": { "type": "string" },
+        "happyMarriagesStories": { "type": "array" },
+        "communityNewsEnabled": { "type": "boolean" },
+        "updatedAt": { "type": "string" }
+      }
+    },
+    "CommunityNews": {
+      "title": "CommunityNews",
+      "description": "Community news and update items managed by Admin.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "category": { "type": "string" },
+        "title": { "type": "string" },
+        "titleEn": { "type": "string" },
+        "date": { "type": "string" },
+        "location": { "type": "string" },
+        "image": { "type": "string" },
+        "summary": { "type": "string" },
+        "fullText": { "type": "string" },
+        "sourceName": { "type": "string" },
+        "sourceUrl": { "type": "string" },
+        "published": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      }
+    },
+    "ContactQuery": {
+      "title": "ContactQuery",
+      "description": "Contact Us and feedback submissions from users for Admin review.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "subject": { "type": "string" },
+        "message": { "type": "string" },
+        "status": { "type": "string", "enum": ["new", "resolved"] },
+        "createdAt": { "type": "string" }
+      }
     }
   },
   "firestore": {
@@ -193,6 +240,18 @@
     "interests/{interestId}": {
       "schema": { "$ref": "#/entities/Interest" },
       "description": "Stores interest expressions and notifications between users."
+    },
+    "config/{configId}": {
+      "schema": { "$ref": "#/entities/Config" },
+      "description": "Stores admin homepage configuration."
+    },
+    "community_news/{newsId}": {
+      "schema": { "$ref": "#/entities/CommunityNews" },
+      "description": "Stores community news articles."
+    },
+    "contactQueries/{queryId}": {
+      "schema": { "$ref": "#/entities/ContactQuery" },
+      "description": "Stores contact and feedback queries."
     }
   }
 }

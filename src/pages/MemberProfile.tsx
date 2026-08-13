@@ -11,6 +11,8 @@ import {
   formatHeightDisplay, 
   translateSiblingsList 
 } from '../lib/profileTranslator';
+import { getOrAssignProfileId, getDisplayProfileId } from '../lib/profileIdUtils';
+import GunaMatchingCard from '../components/GunaMatchingCard';
 
 interface ProfileData {
   uid: string;
@@ -259,6 +261,11 @@ export default function MemberProfile() {
           <div className="md:w-2/3 p-6 md:p-8">
             <div className="flex justify-between items-start mb-4">
               <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="px-3 py-1 rounded-full text-xs font-mono font-extrabold bg-stone-900 text-amber-300 shadow border border-amber-400/30">
+                    ID: {getDisplayProfileId(profile)}
+                  </span>
+                </div>
                 <h1 className="text-3xl font-serif font-bold text-stone-900">
                   {profile.firstName} {profile.lastName}
                 </h1>
@@ -344,138 +351,145 @@ export default function MemberProfile() {
               </dl>
             </div>
 
-            {/* Family Details */}
-            <div>
-              <h3 className="text-lg font-bold text-stone-900 mb-4 border-b border-stone-200 pb-2">
-                {currentLang === 'mr' ? 'कौटुंबिक माहिती' : 'Family Details'}
-              </h3>
-              <dl className="space-y-3">
-                {profile.fatherName && (
+              {/* Family Details */}
+              <div>
+                <h3 className="text-lg font-bold text-stone-900 mb-4 border-b border-stone-200 pb-2">
+                  {currentLang === 'mr' ? 'कौटुंबिक माहिती' : 'Family Details'}
+                </h3>
+                <dl className="space-y-3">
+                  {profile.fatherName && (
+                    <div className="grid grid-cols-3 gap-2">
+                      <dt className="text-sm font-medium text-stone-500">{currentLang === 'mr' ? 'वडिलांचे नाव' : 'Father'}</dt>
+                      <dd className="text-sm text-stone-900 col-span-2">{profile.fatherName}</dd>
+                    </div>
+                  )}
+                  {profile.motherName && (
+                    <div className="grid grid-cols-3 gap-2">
+                      <dt className="text-sm font-medium text-stone-500">{currentLang === 'mr' ? 'आईचे नाव' : 'Mother'}</dt>
+                      <dd className="text-sm text-stone-900 col-span-2">{profile.motherName}</dd>
+                    </div>
+                  )}
+                  {profile.parentsOccupation && (
+                    <div className="grid grid-cols-3 gap-2">
+                      <dt className="text-sm font-medium text-stone-500">{currentLang === 'mr' ? 'पालकांचा व्यवसाय' : 'Occupation'}</dt>
+                      <dd className="text-sm text-stone-900 col-span-2">{translateText(profile.parentsOccupation, currentLang)}</dd>
+                    </div>
+                  )}
                   <div className="grid grid-cols-3 gap-2">
-                    <dt className="text-sm font-medium text-stone-500">{currentLang === 'mr' ? 'वडिलांचे नाव' : 'Father'}</dt>
-                    <dd className="text-sm text-stone-900 col-span-2">{profile.fatherName}</dd>
+                    <dt className="text-sm font-medium text-stone-500">{currentLang === 'mr' ? 'भावंडे' : 'Siblings'}</dt>
+                    <dd className="text-sm text-stone-900 col-span-2">{renderSiblings()}</dd>
                   </div>
-                )}
-                {profile.motherName && (
-                  <div className="grid grid-cols-3 gap-2">
-                    <dt className="text-sm font-medium text-stone-500">{currentLang === 'mr' ? 'आईचे नाव' : 'Mother'}</dt>
-                    <dd className="text-sm text-stone-900 col-span-2">{profile.motherName}</dd>
-                  </div>
-                )}
-                {profile.parentsOccupation && (
-                  <div className="grid grid-cols-3 gap-2">
-                    <dt className="text-sm font-medium text-stone-500">{currentLang === 'mr' ? 'पालकांचा व्यवसाय' : 'Occupation'}</dt>
-                    <dd className="text-sm text-stone-900 col-span-2">{translateText(profile.parentsOccupation, currentLang)}</dd>
-                  </div>
-                )}
-                <div className="grid grid-cols-3 gap-2">
-                  <dt className="text-sm font-medium text-stone-500">{currentLang === 'mr' ? 'भावंडे' : 'Siblings'}</dt>
-                  <dd className="text-sm text-stone-900 col-span-2">{renderSiblings()}</dd>
-                </div>
-              </dl>
-            </div>
+                </dl>
+              </div>
 
-            {/* Maternal Uncle Details */}
-            <div>
-              <h3 className="text-lg font-bold text-stone-900 mb-4 border-b border-stone-200 pb-2">
-                {currentLang === 'mr' ? 'मामाची माहिती (मातृपक्ष)' : 'Maternal Uncle (Mama)'}
-              </h3>
-              <dl className="space-y-3">
-                {profile.maternalUncleName && (
-                  <div className="grid grid-cols-3 gap-2">
-                    <dt className="text-sm font-medium text-stone-500">{currentLang === 'mr' ? 'मामाचे नाव' : 'Name'}</dt>
-                    <dd className="text-sm text-stone-900 col-span-2">{profile.maternalUncleName}</dd>
-                  </div>
-                )}
-                {profile.maternalUncleGotraKul && (
-                  <div className="grid grid-cols-3 gap-2">
-                    <dt className="text-sm font-medium text-stone-500">{currentLang === 'mr' ? 'गोत्र / कुळ' : 'Gotra / Kul'}</dt>
-                    <dd className="text-sm text-stone-900 col-span-2">{translateText(profile.maternalUncleGotraKul, currentLang)}</dd>
-                  </div>
-                )}
-                {profile.maternalUnclePlace && (
-                  <div className="grid grid-cols-3 gap-2">
-                    <dt className="text-sm font-medium text-stone-500">{currentLang === 'mr' ? 'ठिकाण / गाव' : 'Place'}</dt>
-                    <dd className="text-sm text-stone-900 col-span-2">{translateText(profile.maternalUnclePlace, currentLang)}</dd>
-                  </div>
-                )}
-              </dl>
-            </div>
+              {/* Maternal Uncle Details */}
+              <div>
+                <h3 className="text-lg font-bold text-stone-900 mb-4 border-b border-stone-200 pb-2">
+                  {currentLang === 'mr' ? 'मामाची माहिती (मातृपक्ष)' : 'Maternal Uncle (Mama)'}
+                </h3>
+                <dl className="space-y-3">
+                  {profile.maternalUncleName && (
+                    <div className="grid grid-cols-3 gap-2">
+                      <dt className="text-sm font-medium text-stone-500">{currentLang === 'mr' ? 'मामाचे नाव' : 'Name'}</dt>
+                      <dd className="text-sm text-stone-900 col-span-2">{profile.maternalUncleName}</dd>
+                    </div>
+                  )}
+                  {profile.maternalUncleGotraKul && (
+                    <div className="grid grid-cols-3 gap-2">
+                      <dt className="text-sm font-medium text-stone-500">{currentLang === 'mr' ? 'गोत्र / कुळ' : 'Gotra / Kul'}</dt>
+                      <dd className="text-sm text-stone-900 col-span-2">{translateText(profile.maternalUncleGotraKul, currentLang)}</dd>
+                    </div>
+                  )}
+                  {profile.maternalUnclePlace && (
+                    <div className="grid grid-cols-3 gap-2">
+                      <dt className="text-sm font-medium text-stone-500">{currentLang === 'mr' ? 'ठिकाण / गाव' : 'Place'}</dt>
+                      <dd className="text-sm text-stone-900 col-span-2">{translateText(profile.maternalUnclePlace, currentLang)}</dd>
+                    </div>
+                  )}
+                </dl>
+              </div>
 
-            {/* Partner Preferences */}
-            <div>
-              <h3 className="text-lg font-bold text-stone-900 mb-4 border-b border-stone-200 pb-2">
-                {currentLang === 'mr' ? 'जोडीदाराकडून अपेक्षा' : 'Partner Preferences'}
-              </h3>
-              <dl className="space-y-3">
-                <div className="grid grid-cols-3 gap-2">
-                  <dt className="text-sm font-medium text-stone-500">{currentLang === 'mr' ? 'वयोगट' : 'Age Range'}</dt>
-                  <dd className="text-sm text-stone-900 col-span-2">
-                    {profile.partnerPreferences?.ageMin || 18} {currentLang === 'mr' ? 'ते' : 'to'} {profile.partnerPreferences?.ageMax || 30} {currentLang === 'mr' ? 'वर्षे' : 'years'}
-                  </dd>
-                </div>
-                {profile.partnerPreferences?.education && (
+              {/* Partner Preferences */}
+              <div>
+                <h3 className="text-lg font-bold text-stone-900 mb-4 border-b border-stone-200 pb-2">
+                  {currentLang === 'mr' ? 'जोडीदाराकडून अपेक्षा' : 'Partner Preferences'}
+                </h3>
+                <dl className="space-y-3">
                   <div className="grid grid-cols-3 gap-2">
-                    <dt className="text-sm font-medium text-stone-500">{currentLang === 'mr' ? 'शिक्षण' : 'Education'}</dt>
-                    <dd className="text-sm text-stone-900 col-span-2">{translateText(profile.partnerPreferences.education, currentLang)}</dd>
+                    <dt className="text-sm font-medium text-stone-500">{currentLang === 'mr' ? 'वयोगट' : 'Age Range'}</dt>
+                    <dd className="text-sm text-stone-900 col-span-2">
+                      {profile.partnerPreferences?.ageMin || 18} {currentLang === 'mr' ? 'ते' : 'to'} {profile.partnerPreferences?.ageMax || 30} {currentLang === 'mr' ? 'वर्षे' : 'years'}
+                    </dd>
                   </div>
-                )}
-                {profile.partnerPreferences?.profession && (
-                  <div className="grid grid-cols-3 gap-2">
-                    <dt className="text-sm font-medium text-stone-500">{currentLang === 'mr' ? 'व्यवसाय' : 'Profession'}</dt>
-                    <dd className="text-sm text-stone-900 col-span-2">{translateText(profile.partnerPreferences.profession, currentLang)}</dd>
-                  </div>
-                )}
-                {profile.partnerPreferences?.location && (
-                  <div className="grid grid-cols-3 gap-2">
-                    <dt className="text-sm font-medium text-stone-500">{currentLang === 'mr' ? 'ठिकाण' : 'Location'}</dt>
-                    <dd className="text-sm text-stone-900 col-span-2">{translateText(profile.partnerPreferences.location, currentLang)}</dd>
-                  </div>
-                )}
-                {profile.partnerExpectations && (
-                  <div className="grid grid-cols-3 gap-2">
-                    <dt className="text-sm font-medium text-stone-500">{currentLang === 'mr' ? 'इतर अपेक्षा' : 'Expectations'}</dt>
-                    <dd className="text-sm text-stone-900 col-span-2">{profile.partnerExpectations}</dd>
-                  </div>
-                )}
-              </dl>
-            </div>
+                  {profile.partnerPreferences?.education && (
+                    <div className="grid grid-cols-3 gap-2">
+                      <dt className="text-sm font-medium text-stone-500">{currentLang === 'mr' ? 'शिक्षण' : 'Education'}</dt>
+                      <dd className="text-sm text-stone-900 col-span-2">{translateText(profile.partnerPreferences.education, currentLang)}</dd>
+                    </div>
+                  )}
+                  {profile.partnerPreferences?.profession && (
+                    <div className="grid grid-cols-3 gap-2">
+                      <dt className="text-sm font-medium text-stone-500">{currentLang === 'mr' ? 'व्यवसाय' : 'Profession'}</dt>
+                      <dd className="text-sm text-stone-900 col-span-2">{translateText(profile.partnerPreferences.profession, currentLang)}</dd>
+                    </div>
+                  )}
+                  {profile.partnerPreferences?.location && (
+                    <div className="grid grid-cols-3 gap-2">
+                      <dt className="text-sm font-medium text-stone-500">{currentLang === 'mr' ? 'ठिकाण' : 'Location'}</dt>
+                      <dd className="text-sm text-stone-900 col-span-2">{translateText(profile.partnerPreferences.location, currentLang)}</dd>
+                    </div>
+                  )}
+                  {profile.partnerExpectations && (
+                    <div className="grid grid-cols-3 gap-2">
+                      <dt className="text-sm font-medium text-stone-500">{currentLang === 'mr' ? 'इतर अपेक्षा' : 'Expectations'}</dt>
+                      <dd className="text-sm text-stone-900 col-span-2">{profile.partnerExpectations}</dd>
+                    </div>
+                  )}
+                </dl>
+              </div>
 
-            {/* Contact Details */}
-            <div className="md:col-span-2">
-              <h3 className="text-lg font-bold text-stone-900 mb-4 border-b border-stone-200 pb-2">
-                {currentLang === 'mr' ? 'संपर्क माहिती' : 'Contact Details'}
-              </h3>
-              <dl className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {profile.contactNumber && (
-                  <div className="grid grid-cols-3 gap-2">
-                    <dt className="text-sm font-medium text-stone-500">{currentLang === 'mr' ? 'मोबाईल' : 'Phone'}</dt>
-                    <dd className="text-sm text-stone-900 col-span-2 font-bold">{formatPhoneDisplay(profile.contactNumber)}</dd>
-                  </div>
-                )}
-                {profile.parentsContact && (
-                  <div className="grid grid-cols-3 gap-2">
-                    <dt className="text-sm font-medium text-stone-500">{currentLang === 'mr' ? 'पालकांचा फोन' : "Parents' Phone"}</dt>
-                    <dd className="text-sm text-stone-900 col-span-2 font-bold">{formatPhoneDisplay(profile.parentsContact)}</dd>
-                  </div>
-                )}
-                {profile.maternalUnclePhone && (
-                  <div className="grid grid-cols-3 gap-2">
-                    <dt className="text-sm font-medium text-stone-500">{currentLang === 'mr' ? 'मामाचा फोन' : 'Maternal Uncle Phone'}</dt>
-                    <dd className="text-sm text-stone-900 col-span-2 font-bold">{formatPhoneDisplay(profile.maternalUnclePhone)}</dd>
-                  </div>
-                )}
-                {profile.address && (
-                  <div className="grid grid-cols-3 gap-2 md:col-span-2">
-                    <dt className="text-sm font-medium text-stone-500 md:col-span-1">{currentLang === 'mr' ? 'पत्ता' : 'Address'}</dt>
-                    <dd className="text-sm text-stone-900 col-span-2 md:col-span-5">{translateText(profile.address, currentLang)}</dd>
-                  </div>
-                )}
-              </dl>
-            </div>
+              {/* Contact Details */}
+              <div className="md:col-span-2">
+                <h3 className="text-lg font-bold text-stone-900 mb-4 border-b border-stone-200 pb-2">
+                  {currentLang === 'mr' ? 'संपर्क माहिती' : 'Contact Details'}
+                </h3>
+                <dl className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {profile.contactNumber && (
+                    <div className="grid grid-cols-3 gap-2">
+                      <dt className="text-sm font-medium text-stone-500">{currentLang === 'mr' ? 'मोबाईल' : 'Phone'}</dt>
+                      <dd className="text-sm text-stone-900 col-span-2 font-bold">{formatPhoneDisplay(profile.contactNumber)}</dd>
+                    </div>
+                  )}
+                  {profile.parentsContact && (
+                    <div className="grid grid-cols-3 gap-2">
+                      <dt className="text-sm font-medium text-stone-500">{currentLang === 'mr' ? 'पालकांचा फोन' : "Parents' Phone"}</dt>
+                      <dd className="text-sm text-stone-900 col-span-2 font-bold">{formatPhoneDisplay(profile.parentsContact)}</dd>
+                    </div>
+                  )}
+                  {profile.maternalUnclePhone && (
+                    <div className="grid grid-cols-3 gap-2">
+                      <dt className="text-sm font-medium text-stone-500">{currentLang === 'mr' ? 'मामाचा फोन' : 'Maternal Uncle Phone'}</dt>
+                      <dd className="text-sm text-stone-900 col-span-2 font-bold">{formatPhoneDisplay(profile.maternalUnclePhone)}</dd>
+                    </div>
+                  )}
+                  {profile.address && (
+                    <div className="grid grid-cols-3 gap-2 md:col-span-2">
+                      <dt className="text-sm font-medium text-stone-500 md:col-span-1">{currentLang === 'mr' ? 'पत्ता' : 'Address'}</dt>
+                      <dd className="text-sm text-stone-900 col-span-2 md:col-span-5">{translateText(profile.address, currentLang)}</dd>
+                    </div>
+                  )}
+                </dl>
+              </div>
 
+            </div>
           </div>
-        </div>
+
+          {/* Kundali Guna Matching Card - Positioned Below Locations, Family Background & Roots */}
+          {authProfile && profile && (
+            <div className="p-6 md:p-8 border-t border-stone-100 bg-white">
+              <GunaMatchingCard myProfile={authProfile} targetProfile={profile} />
+            </div>
+          )}
       </div>
 
       {/* Full Image Modal */}

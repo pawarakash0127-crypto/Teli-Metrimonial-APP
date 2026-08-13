@@ -10,17 +10,21 @@ import LoginRequiredModal from '../components/LoginRequiredModal';
 import { getOppositeGenderLabel, isOppositeGender, normalizeGender } from '../lib/genderUtils';
 import { seedSampleProfilesToFirestore } from '../lib/seedProfiles';
 import { HIGHEST_EDUCATION_CATEGORIES } from '../types';
-import { calculateMatchScore, calculateProfileCompleteness, ProfileDataForMatching, MatchAnalysis, getProfileBirthYear } from '../lib/matchingUtils';
+import { calculateMatchScore, calculateProfileCompleteness, ProfileDataForMatching, MatchAnalysis, getProfileBirthYear, DEFAULT_MATCH_THRESHOLD } from '../lib/matchingUtils';
 import { translateText, formatAgeDisplay, formatHeightDisplay } from '../lib/profileTranslator';
+import { getOrAssignProfileId, getDisplayProfileId, matchesProfileId, extractSequenceNumber } from '../lib/profileIdUtils';
 
 interface ProfileData {
   uid: string;
+  profileId?: string;
   firstName: string;
   lastName: string;
   gender: string;
   age: number;
   height: string;
   education: string;
+  highestEducation?: string;
+  customEducation?: string;
   profession: string;
   location: string;
   photoUrl?: string;
@@ -67,11 +71,13 @@ export default function Search() {
   const [activeTab, setActiveTab] = useState<'search' | 'matches'>('search');
   
   const [filters, setFilters] = useState({
+    profileIdSearch: '',
     gender: 'Any',
     ageMin: 18,
     ageMax: 40,
     preferredBirthYear: '',
     education: '',
+    customEducation: '',
     profession: '',
     location: '',
     maritalStatus: 'Any'
@@ -88,6 +94,12 @@ export default function Search() {
   }, [location.state]);
 
   useEffect(() => {
+    if (!user && activeTab === 'matches') {
+      setActiveTab('search');
+    }
+  }, [user, activeTab]);
+
+  useEffect(() => {
     let unsubProfile: (() => void) | null = null;
     let unsubProfiles: (() => void) | null = null;
 
@@ -101,6 +113,8 @@ export default function Search() {
             setFilters(prev => ({ ...prev, gender: oppGender }));
           }
         }
+      }, (err) => {
+        console.warn("Error fetching profile snapshot in Search:", err);
       });
     }
 
@@ -123,7 +137,9 @@ export default function Search() {
         const data = docSnap.data() as ProfileData;
         if ((!user || data.uid !== user.uid) && (!myProfile || data.uid !== myProfile.uid)) {
           if (!data.isArchived && data.status !== 'archived') {
-            fetchedProfiles.push(data);
+            if ((data as any).role !== 'admin' && !(data as any).isAdmin) {
+              fetchedProfiles.push(data);
+            }
           }
         }
       });
@@ -199,7 +215,11 @@ export default function Search() {
         if ((user && p.uid === user.uid) || (myProfile && p.uid === myProfile.uid)) return false;
         if ((p as any).isArchived || p.status === 'archived' || p.status !== 'approved') return false;
         const analysis = matchAnalysisMap.get(p.uid);
-        return analysis && analysis.isEligible;
+        if (!analysis || !analysis.isEligible) return false;
+        
+        // Enforce >40% match score or good Kundali/Guna match (>=18/36)
+        const isAboveThreshold = analysis.matchPercentage > DEFAULT_MATCH_THRESHOLD || (analysis.gunaResult && analysis.gunaResult.totalScore >= 18);
+        return isAboveThreshold;
       });
 
       // Sort by Match Percentage desc, Profile Completeness desc, Updated Date desc
@@ -219,9 +239,15 @@ export default function Search() {
     }
 
     // Manual Search Filters
-    return profiles.filter(p => {
+    const manualFiltered = profiles.filter(p => {
       if ((user && p.uid === user.uid) || (myProfile && p.uid === myProfile.uid)) return false;
       if ((p as any).isArchived || p.status === 'archived') return false;
+
+      // Direct Profile ID / Vadu-Var Number Search
+      if (filters.profileIdSearch && filters.profileIdSearch.trim()) {
+        if (!matchesProfileId(p, filters.profileIdSearch)) return false;
+      }
+
       if (filters.gender !== 'Any' && p.gender !== filters.gender) return false;
       if (filters.preferredBirthYear) {
         const prefYear = Number(filters.preferredBirthYear);
@@ -229,10 +255,36 @@ export default function Search() {
         if (candYear < prefYear) return false;
       }
       if (filters.maritalStatus !== 'Any' && p.maritalStatus !== filters.maritalStatus) return false;
-      if (filters.education && !p.education?.toLowerCase().includes(filters.education.toLowerCase())) return false;
+
+      // Education Filter
+      if (filters.education) {
+        const eduQuery = (filters.education === 'Others' ? filters.customEducation : filters.education).trim().toLowerCase();
+        if (eduQuery) {
+          const candEdu = [p.highestEducation, p.customEducation, p.education].filter(Boolean).join(' ').toLowerCase();
+          if (!candEdu.includes(eduQuery)) return false;
+        }
+      }
+
       if (filters.profession && !p.profession?.toLowerCase().includes(filters.profession.toLowerCase())) return false;
       if (filters.location && !p.location?.toLowerCase().includes(filters.location.toLowerCase())) return false;
       return true;
+    });
+
+    // Sort manual search profiles in strict sequence order (e.g. VAR-001, VAR-002, VAR-003, VADU-001...)
+    return [...manualFiltered].sort((a, b) => {
+      const seqA = extractSequenceNumber(a.profileId || (a as any).vaduVarNumber || a.uid);
+      const seqB = extractSequenceNumber(b.profileId || (b as any).vaduVarNumber || b.uid);
+      if (seqA !== seqB && seqA > 0 && seqB > 0) {
+        return seqA - seqB;
+      }
+
+      const idA = getDisplayProfileId(a);
+      const idB = getDisplayProfileId(b);
+      if (idA !== idB) return idA.localeCompare(idB);
+
+      const dateA = (a as any).createdAt ? new Date((a as any).createdAt).getTime() : 0;
+      const dateB = (b as any).createdAt ? new Date((b as any).createdAt).getTime() : 0;
+      return dateA - dateB;
     });
   }, [activeTab, profiles, myProfile, user, hasPreferencesSet, matchAnalysisMap, filters]);
 
@@ -275,17 +327,59 @@ export default function Search() {
     <div className="max-w-7xl mx-auto px-4 py-12 flex flex-col md:flex-row gap-8">
       {/* Sidebar Filters */}
       <div className="w-full md:w-80 flex-shrink-0">
-        <div className="bg-white p-6 rounded-3xl shadow-xl border-2 border-saffron/10 sticky top-24 overflow-hidden">
+        <div className="bg-white p-6 rounded-3xl shadow-xl border-2 border-saffron/10 sticky top-24 max-h-[calc(100vh-120px)] flex flex-col">
           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-saffron to-gold"></div>
-          <div className="flex items-center gap-2 mb-6 pb-4 border-b border-stone-100">
-            <SearchIcon className="h-5 w-5 text-saffron" />
-            <h2 className="text-xl font-serif font-bold text-stone-900">{t('search.filters')}</h2>
+          
+          <div className="flex items-center justify-between mb-4 pb-3 border-b border-stone-100 flex-shrink-0">
+            <div className="flex items-center gap-2">
+              <SearchIcon className="h-5 w-5 text-saffron" />
+              <h2 className="text-xl font-serif font-bold text-stone-900">{t('search.filters')}</h2>
+            </div>
+            {(filters.profileIdSearch || filters.gender !== 'Any' || filters.education || filters.profession || filters.location || filters.preferredBirthYear || filters.maritalStatus !== 'Any') && (
+              <button
+                onClick={() => setFilters({
+                  profileIdSearch: '',
+                  gender: 'Any',
+                  ageMin: 18,
+                  ageMax: 40,
+                  preferredBirthYear: '',
+                  education: '',
+                  customEducation: '',
+                  profession: '',
+                  location: '',
+                  maritalStatus: 'Any'
+                })}
+                className="text-xs text-saffron font-bold hover:underline"
+              >
+                Reset
+              </button>
+            )}
           </div>
           
-          <div className="space-y-5">
+          <div className="space-y-5 overflow-y-auto pr-1 flex-1">
+            {/* Search Profile by Vadhu/Var Number */}
+            <div className="bg-orange-50/60 p-3 rounded-2xl border border-saffron/20">
+              <label className="block text-xs font-bold text-stone-800 uppercase tracking-wider mb-1">
+                Direct Search by Profile ID
+              </label>
+              <div className="relative">
+                <input 
+                  disabled={activeTab === 'matches'} 
+                  type="text" 
+                  name="profileIdSearch" 
+                  placeholder="e.g. VAR-001 or VADHU-001" 
+                  value={filters.profileIdSearch} 
+                  onChange={handleFilterChange} 
+                  className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-2.5 pl-8 border bg-white disabled:opacity-50 transition-all text-xs font-mono font-bold" 
+                />
+                <SearchIcon className="w-3.5 h-3.5 text-saffron absolute left-2.5 top-3" />
+              </div>
+              <p className="text-[10px] text-stone-500 mt-1 ml-0.5">Type 001, VAR-001 or VADHU-002</p>
+            </div>
+
             <div>
               <label className="block text-sm font-bold text-stone-700 mb-1.5 ml-1">{t('search.gender')}</label>
-              <select disabled={activeTab === 'matches'} name="gender" value={filters.gender} onChange={handleFilterChange} className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-2.5 border bg-white disabled:opacity-50 transition-all">
+              <select disabled={activeTab === 'matches'} name="gender" value={filters.gender} onChange={handleFilterChange} className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-2.5 border bg-white disabled:opacity-50 transition-all text-sm font-medium">
                 <option value="Any">{t('search.any')}</option>
                 <option value="Male">{t('search.male')}</option>
                 <option value="Female">{t('search.female')}</option>
@@ -301,16 +395,16 @@ export default function Search() {
                 placeholder="e.g. 1998 (1998 & later)" 
                 value={filters.preferredBirthYear} 
                 onChange={handleFilterChange} 
-                className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-2.5 border disabled:opacity-50 transition-all" 
+                className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-2.5 border disabled:opacity-50 transition-all text-sm" 
               />
               <p className="text-[11px] text-stone-400 mt-1 ml-1 font-medium">Shows profiles born in 1998 or later</p>
             </div>
 
             <div>
               <label className="block text-sm font-bold text-stone-700 mb-1.5 ml-1">Marital Status</label>
-              <select disabled={activeTab === 'matches'} name="maritalStatus" value={filters.maritalStatus} onChange={handleFilterChange} className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-2.5 border bg-white disabled:opacity-50 transition-all">
+              <select disabled={activeTab === 'matches'} name="maritalStatus" value={filters.maritalStatus} onChange={handleFilterChange} className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-2.5 border bg-white disabled:opacity-50 transition-all text-sm font-medium">
                 <option value="Any">Any</option>
-                <option value="Never Married">Never Married</option>
+                <option value="Unmarried">Unmarried</option>
                 <option value="Divorced">Divorced</option>
                 <option value="Widowed">Widowed</option>
                 <option value="Awaiting Divorce">Awaiting Divorce</option>
@@ -319,27 +413,33 @@ export default function Search() {
 
             <div>
               <label className="block text-sm font-bold text-stone-700 mb-1.5 ml-1">{t('search.education')}</label>
-              <input 
-                disabled={activeTab === 'matches'} 
-                type="text" 
-                name="education" 
-                placeholder="e.g. Engineer, MBA, Pune" 
-                value={filters.education} 
-                onChange={handleFilterChange} 
-                className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-2.5 border disabled:opacity-50 transition-all mb-2" 
-              />
               <select 
                 disabled={activeTab === 'matches'} 
                 name="education" 
                 value={filters.education} 
                 onChange={handleFilterChange} 
-                className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-2.5 border bg-white disabled:opacity-50 transition-all text-xs"
+                className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-2.5 border bg-white disabled:opacity-50 transition-all text-sm font-medium"
               >
-                <option value="">-- Or select degree category --</option>
+                <option value="">-- All Education --</option>
                 {HIGHEST_EDUCATION_CATEGORIES.map(cat => (
                   <option key={cat} value={cat}>{cat}</option>
                 ))}
+                <option value="Others">Others</option>
               </select>
+
+              {filters.education === 'Others' && (
+                <div className="mt-2">
+                  <input 
+                    disabled={activeTab === 'matches'} 
+                    type="text" 
+                    name="customEducation" 
+                    placeholder="Type education degree/field..." 
+                    value={filters.customEducation} 
+                    onChange={handleFilterChange} 
+                    className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-2.5 border disabled:opacity-50 transition-all text-sm bg-orange-50/30" 
+                  />
+                </div>
+              )}
             </div>
 
             <div>
@@ -376,65 +476,67 @@ export default function Search() {
               Manual Search
             </button>
             
-            <div className="relative">
-              <button 
-                onClick={() => {
-                  setActiveTab('matches');
-                  setShowMatchesPointer(false);
-                }}
-                className={`px-5 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 relative ${activeTab === 'matches' ? 'bg-white text-saffron shadow-md' : 'text-stone-500 hover:text-stone-700'}`}
-              >
-                <Heart className={`h-4 w-4 ${activeTab === 'matches' ? 'fill-saffron text-saffron' : 'text-red-500 fill-red-500'}`} />
-                <span>My Matches</span>
-                {activeTab === 'search' && (
-                  <span className="flex h-2 w-2 relative">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-saffron opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-saffron"></span>
-                  </span>
-                )}
-              </button>
+            {user && (
+              <div className="relative">
+                <button 
+                  onClick={() => {
+                    setActiveTab('matches');
+                    setShowMatchesPointer(false);
+                  }}
+                  className={`px-5 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 relative ${activeTab === 'matches' ? 'bg-white text-saffron shadow-md' : 'text-stone-500 hover:text-stone-700'}`}
+                >
+                  <Heart className={`h-4 w-4 ${activeTab === 'matches' ? 'fill-saffron text-saffron' : 'text-red-500 fill-red-500'}`} />
+                  <span>My Matches</span>
+                  {activeTab === 'search' && (
+                    <span className="flex h-2 w-2 relative">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-saffron opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-saffron"></span>
+                    </span>
+                  )}
+                </button>
 
-              {/* Small Popup Pointer pointing directly to My Matches */}
-              {showMatchesPointer && activeTab === 'search' && (
-                <div className="absolute right-0 top-full mt-3 z-50 w-72 sm:w-80 bg-stone-900 text-white p-4 rounded-2xl shadow-2xl border-2 border-saffron animate-bounce-subtle">
-                  {/* Triangle Arrow pointing up */}
-                  <div className="absolute -top-2 right-8 w-4 h-4 bg-stone-900 border-t-2 border-l-2 border-saffron rotate-45"></div>
-                  
-                  <div className="flex items-start gap-3">
-                    <div className="p-2 bg-saffron text-white rounded-xl flex-shrink-0 mt-0.5">
-                      <Sparkles className="w-5 h-5 text-white" />
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between mb-1">
-                        <h4 className="font-serif font-bold text-sm text-amber-300">
-                          Discover "My Matches"!
-                        </h4>
-                        <button 
-                          onClick={() => setShowMatchesPointer(false)}
-                          className="text-stone-400 hover:text-white p-1 rounded-lg transition-colors"
-                          aria-label="Close tooltip"
+                {/* Small Popup Pointer pointing directly to My Matches */}
+                {showMatchesPointer && activeTab === 'search' && (
+                  <div className="absolute right-0 top-full mt-3 z-50 w-72 sm:w-80 bg-stone-900 text-white p-4 rounded-2xl shadow-2xl border-2 border-saffron animate-bounce-subtle">
+                    {/* Triangle Arrow pointing up */}
+                    <div className="absolute -top-2 right-8 w-4 h-4 bg-stone-900 border-t-2 border-l-2 border-saffron rotate-45"></div>
+                    
+                    <div className="flex items-start gap-3">
+                      <div className="p-2 bg-saffron text-white rounded-xl flex-shrink-0 mt-0.5">
+                        <Sparkles className="w-5 h-5 text-white" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between mb-1">
+                          <h4 className="font-serif font-bold text-sm text-amber-300">
+                            Discover "My Matches"!
+                          </h4>
+                          <button 
+                            onClick={() => setShowMatchesPointer(false)}
+                            className="text-stone-400 hover:text-white p-1 rounded-lg transition-colors"
+                            aria-label="Close tooltip"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                        <p className="text-xs text-stone-300 leading-relaxed font-medium mb-3">
+                          Check out top candidates matched to your preferences automatically with high compatibility!
+                        </p>
+                        <button
+                          onClick={() => {
+                            setActiveTab('matches');
+                            setShowMatchesPointer(false);
+                          }}
+                          className="w-full bg-saffron hover:bg-orange-600 text-white text-xs font-bold py-2 rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5 active:scale-95"
                         >
-                          <X className="w-4 h-4" />
+                          <span>Check My Matches</span>
+                          <Heart className="w-3.5 h-3.5 fill-white" />
                         </button>
                       </div>
-                      <p className="text-xs text-stone-300 leading-relaxed font-medium mb-3">
-                        Check out top candidates matched to your preferences automatically with high compatibility!
-                      </p>
-                      <button
-                        onClick={() => {
-                          setActiveTab('matches');
-                          setShowMatchesPointer(false);
-                        }}
-                        className="w-full bg-saffron hover:bg-orange-600 text-white text-xs font-bold py-2 rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5 active:scale-95"
-                      >
-                        <span>Check My Matches</span>
-                        <Heart className="w-3.5 h-3.5 fill-white" />
-                      </button>
                     </div>
                   </div>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -517,6 +619,7 @@ export default function Search() {
             {displayProfiles.map(profile => {
               const matchAnalysis = matchAnalysisMap.get(profile.uid);
               const matchPercentage = matchAnalysis?.matchPercentage || 0;
+              const pId = getDisplayProfileId(profile);
 
               return (
                 <div key={profile.uid} className="bg-white rounded-3xl overflow-hidden shadow-lg border border-stone-100 hover:shadow-xl transition-all group relative">
@@ -524,17 +627,20 @@ export default function Search() {
                     onClick={() => !user && handleViewProfile(profile)}
                     className={`aspect-[4/5] bg-stone-100 relative overflow-hidden ${!user ? 'cursor-pointer' : ''}`}
                   >
-                    {/* Match Score Badge for My Matches */}
-                    {activeTab === 'matches' && (
-                      <div className="absolute top-4 left-4 z-10">
-                        <span className={`px-3.5 py-1.5 rounded-full text-xs font-bold text-white shadow-lg backdrop-blur-md flex items-center gap-1.5 ${
+                    {/* Profile ID badge top-left (when activeTab is manual search) or next to match */}
+                    <div className="absolute top-4 left-4 z-10 flex flex-col gap-1.5 items-start">
+                      <span className="px-3 py-1 rounded-full text-xs font-mono font-extrabold bg-stone-900/90 text-amber-300 shadow-md backdrop-blur-md border border-amber-400/30 tracking-wider">
+                        {pId}
+                      </span>
+                      {activeTab === 'matches' && (
+                        <span className={`px-3 py-1 rounded-full text-xs font-bold text-white shadow-lg backdrop-blur-md flex items-center gap-1 ${
                           matchPercentage >= 80 ? 'bg-emerald-600/90 border border-emerald-400/30' : matchPercentage >= 50 ? 'bg-amber-600/90 border border-amber-400/30' : 'bg-stone-700/90 border border-stone-500/30'
                         }`}>
-                          <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                          <Sparkles className="w-3 h-3 text-amber-300" />
                           {matchPercentage}% Match
                         </span>
-                      </div>
-                    )}
+                      )}
+                    </div>
 
                     {user && myProfile && profile.uid !== user.uid && profile.uid !== myProfile.uid && (
                       <button 

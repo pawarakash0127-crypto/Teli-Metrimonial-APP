@@ -8,6 +8,7 @@ import ForgotPasswordModal from '../components/ForgotPasswordModal';
 import { SAMPLE_ACCOUNTS } from '../lib/seedProfiles';
 import { useTranslation } from 'react-i18next';
 import { triggerWelcomeEmail } from '../lib/welcomeEmail';
+import logoImg from '../assets/images/LOGO.jpg';
 
 declare global {
   interface Window {
@@ -205,6 +206,24 @@ export default function Login() {
       setError('');
       setLoading(true);
       const res = await window.confirmationResult.confirm(otp);
+      
+      if (res.user) {
+        const uid = res.user.uid;
+        const profileRef = doc(db, 'profiles', uid);
+        const profileSnap = await getDoc(profileRef);
+
+        const rawPhone = res.user.phoneNumber || phone || '';
+        const digits = rawPhone.replace(/[^\d]/g, '');
+        const normPhone = digits.length >= 10 ? digits.slice(-10) : digits;
+
+        if (profileSnap.exists()) {
+          const pData = profileSnap.data();
+          if (normPhone && (!pData.contactNumber || String(pData.contactNumber).trim() === '')) {
+            await setDoc(profileRef, { contactNumber: normPhone, updatedAt: new Date().toISOString() }, { merge: true });
+          }
+        }
+      }
+
       await checkArchivedOrAdminAndNavigate(res.user.uid, from);
     } catch (err: any) {
       setError(err.message || 'Invalid OTP');
@@ -222,7 +241,7 @@ export default function Login() {
         <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-saffron via-gold to-saffron"></div>
         <div className="flex flex-col items-center mb-4">
           <img 
-            src="/logo.jpg" 
+            src={logoImg} 
             alt="राष्ट्रीय तेली समाज" 
             className="w-16 h-16 rounded-full object-cover border-2 border-saffron shadow-md bg-white p-0.5" 
           />

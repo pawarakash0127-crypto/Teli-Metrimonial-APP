@@ -1,4 +1,7 @@
 import { isOppositeGender } from './genderUtils';
+import { calculateGunaMilan, GunaResult } from './gunaMilanUtils';
+
+export const DEFAULT_MATCH_THRESHOLD = 40;
 
 export interface ProfileDataForMatching {
   uid: string;
@@ -7,11 +10,15 @@ export interface ProfileDataForMatching {
   gender: string;
   age: number;
   dob?: string;
+  timeOfBirth?: string;
+  birthplace?: string;
   height?: string;
   education?: string;
   highestEducation?: string;
   degreeDetails?: string;
+  customEducation?: string;
   profession?: string;
+  income?: string;
   location?: string;
   nativePlace?: string;
   parentsHometown?: string;
@@ -42,6 +49,7 @@ export interface MatchAnalysis {
   educationMatched: boolean;
   locationMatched: boolean;
   birthYearSatisfied: boolean;
+  gunaResult?: GunaResult;
 }
 
 export function normalizeString(str?: string): string {
@@ -96,7 +104,6 @@ export function calculateMatchScore(
   const reasons: string[] = [];
 
   // 1. MANDATORY ELIGIBILITY FILTERS
-  // Self check
   if (candidate.uid === myProfile.uid) {
     return {
       matchPercentage: 0,
@@ -149,7 +156,6 @@ export function calculateMatchScore(
 
   if (prefYear && !isNaN(prefYear) && prefYear > 1950) {
     if (candidateBirthYear < prefYear) {
-      // Fails mandatory eligibility filter
       return {
         matchPercentage: 0,
         reasons: [],
@@ -167,6 +173,21 @@ export function calculateMatchScore(
     }
   }
 
+  // Calculate Guna Milan if gender is opposite
+  let gunaResult: GunaResult | undefined;
+  if (myProfile.dob && candidate.dob) {
+    const isMaleGroom = myProfile.gender?.toLowerCase() === 'male';
+    const groomDob = isMaleGroom ? myProfile.dob : candidate.dob;
+    const groomTime = isMaleGroom ? myProfile.timeOfBirth : candidate.timeOfBirth;
+    const brideDob = isMaleGroom ? candidate.dob : myProfile.dob;
+    const brideTime = isMaleGroom ? candidate.timeOfBirth : myProfile.timeOfBirth;
+
+    gunaResult = calculateGunaMilan(groomDob, groomTime, brideDob, brideTime);
+    if (gunaResult.isAvailable) {
+      reasons.push(`✓ Kundali / Guna Match: ${gunaResult.totalScore}/36 (${gunaResult.summaryText})`);
+    }
+  }
+
   // 2. SCORING FIELDS
   let earnedPoints = 0;
   let maxPoints = 0;
@@ -176,7 +197,7 @@ export function calculateMatchScore(
   const eduTokens = parsePreferenceTokens(prefs.education);
   if (eduTokens.length > 0) {
     maxPoints += 40;
-    const candEdu = [candidate.highestEducation, candidate.degreeDetails, candidate.education]
+    const candEdu = [candidate.highestEducation, candidate.degreeDetails, candidate.customEducation, candidate.education]
       .filter(Boolean)
       .join(' ');
 
@@ -185,7 +206,7 @@ export function calculateMatchScore(
       educationMatched = true;
       reasons.push(`✓ Education matches (${candidate.highestEducation || candidate.degreeDetails || candidate.education})`);
     } else {
-      reasons.push(`○ Location/Education preference (${Array.isArray(prefs.education) ? prefs.education.join(', ') : prefs.education}) not matched`);
+      reasons.push(`○ Education preference not matched`);
     }
   }
 
@@ -203,11 +224,11 @@ export function calculateMatchScore(
       locationMatched = true;
       reasons.push(`✓ Location matches (${candidate.location || candidate.nativePlace})`);
     } else {
-      reasons.push(`○ Location preference (${Array.isArray(prefs.location) ? prefs.location.join(', ') : prefs.location}) not matched`);
+      reasons.push(`○ Location preference not matched`);
     }
   }
 
-  // Additional Compatibility = 30 points (Marital Status 15 pts, Profession 15 pts)
+  // Additional Compatibility (Marital Status 15 pts, Profession 15 pts)
   const msTokens = parsePreferenceTokens(prefs.maritalStatus);
   if (msTokens.length > 0) {
     maxPoints += 15;
@@ -215,18 +236,17 @@ export function calculateMatchScore(
       earnedPoints += 15;
       reasons.push(`✓ Marital status matches (${candidate.maritalStatus})`);
     } else if (candidate.maritalStatus) {
-      reasons.push(`○ Marital status preference (${Array.isArray(prefs.maritalStatus) ? prefs.maritalStatus.join(', ') : prefs.maritalStatus}) not matched`);
+      reasons.push(`○ Marital status preference not matched`);
     }
   }
 
-  const profTokens = parsePreferenceTokens(prefs.profession);
-  if (profTokens.length > 0) {
-    maxPoints += 15;
-    if (candidate.profession && matchesAnyToken(profTokens, candidate.profession)) {
-      earnedPoints += 15;
-      reasons.push(`✓ Profession matches (${candidate.profession})`);
-    } else if (candidate.profession) {
-      reasons.push(`○ Profession preference (${Array.isArray(prefs.profession) ? prefs.profession.join(', ') : prefs.profession}) not matched`);
+  // Safely handle income matching
+  const incTokens = parsePreferenceTokens(prefs.income);
+  if (incTokens.length > 0 && candidate.income) {
+    maxPoints += 10;
+    if (matchesAnyToken(incTokens, candidate.income)) {
+      earnedPoints += 10;
+      reasons.push(`✓ Income preference matches`);
     }
   }
 
@@ -234,7 +254,7 @@ export function calculateMatchScore(
 
   if (maxPoints === 0) {
     return {
-      matchPercentage: hasPreferencesSet ? 100 : 0,
+      matchPercentage: hasPreferencesSet ? 100 : 75,
       reasons,
       isEligible: true,
       hasPreferencesSet,
@@ -242,7 +262,8 @@ export function calculateMatchScore(
       maxPoints: 0,
       educationMatched,
       locationMatched,
-      birthYearSatisfied
+      birthYearSatisfied,
+      gunaResult
     };
   }
 
@@ -257,6 +278,141 @@ export function calculateMatchScore(
     maxPoints,
     educationMatched,
     locationMatched,
-    birthYearSatisfied
+    birthYearSatisfied,
+    gunaResult
+  };
+}
+
+/**
+ * Diagnostic helper for Admin Dashboard to analyze why a user has no matches.
+ */
+export function generateNoMatchReason(
+  myProfile: ProfileDataForMatching,
+  allApprovedCandidates: ProfileDataForMatching[]
+): { category: string; detail: string } {
+  if (myProfile.status !== 'approved') {
+    return {
+      category: 'Profile Not Approved',
+      detail: `Profile status is '${myProfile.status || 'pending'}'. Only approved profiles appear in automated matching.`
+    };
+  }
+
+  const completeness = calculateProfileCompleteness(myProfile);
+  if (completeness < 40) {
+    return {
+      category: 'Incomplete Profile',
+      detail: `Profile completion is low (${completeness}%). Missing crucial fields like photo, education, birthplace, or location.`
+    };
+  }
+
+  if (!allApprovedCandidates || allApprovedCandidates.length === 0) {
+    return {
+      category: 'No Active Profiles',
+      detail: "No active approved profiles exist in the system database."
+    };
+  }
+
+  const oppositeGenderCandidates = allApprovedCandidates.filter(
+    c => c.uid !== myProfile.uid && isOppositeGender(myProfile.gender, c.gender)
+  );
+
+  if (oppositeGenderCandidates.length === 0) {
+    return {
+      category: 'No Gender Candidates',
+      detail: `No active approved ${myProfile.gender?.toLowerCase() === 'male' ? 'Female (Bride)' : 'Male (Groom)'} profiles available.`
+    };
+  }
+
+  const prefs = myProfile.partnerPreferences || {};
+  const hasBirthYear = Boolean(prefs.preferredBirthYear && Number(prefs.preferredBirthYear) > 1950);
+  const hasEdu = Boolean(prefs.education && parsePreferenceTokens(prefs.education).length > 0);
+  const hasLoc = Boolean(prefs.location && parsePreferenceTokens(prefs.location).length > 0);
+  const hasMarital = Boolean(prefs.maritalStatus && parsePreferenceTokens(prefs.maritalStatus).length > 0);
+
+  if (!hasBirthYear && !hasEdu && !hasLoc && !hasMarital) {
+    return {
+      category: 'Preferences Not Set',
+      detail: "No partner preferences configured. Set preferred birth year, location, or education in profile."
+    };
+  }
+
+  const prefYear = prefs.preferredBirthYear ? Number(prefs.preferredBirthYear) : null;
+  if (prefYear && !isNaN(prefYear) && prefYear > 1950) {
+    const satisfyingBirthYear = oppositeGenderCandidates.filter(c => getProfileBirthYear(c) >= prefYear);
+    if (satisfyingBirthYear.length === 0) {
+      return {
+        category: 'Age / Birth-Year Preference Unmet',
+        detail: `No profiles satisfy the birth-year criteria (${prefYear}+). Excluded all ${oppositeGenderCandidates.length} candidates.`
+      };
+    }
+  }
+
+  const eduTokens = parsePreferenceTokens(prefs.education);
+  if (eduTokens.length > 0) {
+    const eduMatches = oppositeGenderCandidates.filter(c => {
+      const candEdu = [c.highestEducation, c.degreeDetails, c.customEducation, c.education].filter(Boolean).join(' ');
+      return matchesAnyToken(eduTokens, candEdu);
+    });
+    if (eduMatches.length === 0) {
+      return {
+        category: 'Education Preference Unmet',
+        detail: `No candidate profiles satisfy the required education criteria ('${Array.isArray(prefs.education) ? prefs.education.join(', ') : prefs.education}').`
+      };
+    }
+  }
+
+  const locTokens = parsePreferenceTokens(prefs.location);
+  if (locTokens.length > 0) {
+    const locMatches = oppositeGenderCandidates.filter(c => {
+      const candLoc = [c.location, c.nativePlace, c.parentsHometown, c.address].filter(Boolean).join(' ');
+      return matchesAnyToken(locTokens, candLoc);
+    });
+    if (locMatches.length === 0) {
+      return {
+        category: 'Location Preference Unmet',
+        detail: `No candidate profiles satisfy the location criteria ('${Array.isArray(prefs.location) ? prefs.location.join(', ') : prefs.location}').`
+      };
+    }
+  }
+
+  const msTokens = parsePreferenceTokens(prefs.maritalStatus);
+  if (msTokens.length > 0) {
+    const msMatches = oppositeGenderCandidates.filter(c => c.maritalStatus && matchesAnyToken(msTokens, c.maritalStatus));
+    if (msMatches.length === 0) {
+      return {
+        category: 'Marital Status Preference Unmet',
+        detail: `No candidate profiles satisfy the marital status criteria ('${prefs.maritalStatus}').`
+      };
+    }
+  }
+
+  // Check Kundali / Guna threshold if DOBs available
+  let gunaFilteredOutCount = 0;
+  if (myProfile.dob) {
+    for (const cand of oppositeGenderCandidates) {
+      if (cand.dob) {
+        const isMaleGroom = myProfile.gender?.toLowerCase() === 'male';
+        const result = calculateGunaMilan(
+          isMaleGroom ? myProfile.dob : cand.dob,
+          isMaleGroom ? myProfile.timeOfBirth : cand.timeOfBirth,
+          isMaleGroom ? cand.dob : myProfile.dob,
+          isMaleGroom ? cand.timeOfBirth : myProfile.timeOfBirth
+        );
+        if (result.isAvailable && result.totalScore < 18) {
+          gunaFilteredOutCount++;
+        }
+      }
+    }
+    if (gunaFilteredOutCount === oppositeGenderCandidates.length) {
+      return {
+        category: 'Kundali / Guna Threshold Not Met',
+        detail: `Kundali Ashtakoota Guna Milan score was below 18/36 threshold for all ${gunaFilteredOutCount} available candidate profiles.`
+      };
+    }
+  }
+
+  return {
+    category: 'Matching Criteria Conflict',
+    detail: `Candidates did not meet combined threshold score of ${DEFAULT_MATCH_THRESHOLD}% matching criteria.`
   };
 }

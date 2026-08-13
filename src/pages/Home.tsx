@@ -1,6 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, Heart, ShieldCheck, Users, MapPin, Briefcase, GraduationCap, X, User, Lock, Newspaper, Calendar, ArrowRight, Share2, Globe, ExternalLink } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { Search, Heart, ShieldCheck, Users, MapPin, Briefcase, GraduationCap, X, User, Lock, Newspaper, Calendar, ArrowRight, Share2, Globe, ExternalLink, Star, MessageSquare } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
 import { db, collection, getDocs, query, where, limit, doc, getDoc, updateDoc, onSnapshot } from '../lib/firebase';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
@@ -8,91 +8,13 @@ import ImageCarousel from '../components/ImageCarousel';
 import LoginRequiredModal from '../components/LoginRequiredModal';
 import { isOppositeGender } from '../lib/genderUtils';
 import { seedSampleProfilesToFirestore } from '../lib/seedProfiles';
-
-interface NewsItem {
-  id: string;
-  category: string;
-  title: string;
-  titleEn: string;
-  date: string;
-  location: string;
-  image: string;
-  summary: string;
-  fullText: string;
-  sourceName: string;
-  sourceUrl: string;
-}
-
-const COMMUNITY_NEWS: NewsItem[] = [
-  {
-    id: 'news-1',
-    category: 'वधू-वर परिचय मेळावा',
-    title: 'नाशिक जिल्हा तेली समाज भव्य राज्यस्तरीय वधू-वर परिचय मेळावा २०२६',
-    titleEn: 'Nashik District Teli Samaj State-Level Matrimonial Meet 2026',
-    date: '15 ऑगस्ट 2026',
-    location: 'रावसाहेब थोरात सभागृह, गंगापूर रोड, नाशिक',
-    image: 'https://images.unsplash.com/photo-1511795409834-ef04bbd61622?auto=format&fit=crop&q=80&w=800',
-    summary: 'नाशिक जिल्हा तेली समाज संचलित वधू-वर सूचक केंद्रातर्फे भव्य राज्यस्तरीय परिचय मेळावा आयोजित करण्यात आला आहे. डिजिटल माहिती पुस्तिकेचे प्रकाशन व ऑनलाईन नावनोंदणी सुविधा उपलब्ध.',
-    fullText: 'नाशिक जिल्हा संचलित तेली समाज वधू-वर सूचक केंद्राच्या वतीने आगामी १५ ऑगस्ट २०२६ रोजी गंगापूर रोड येथील रावसाहेब थोरात सभागृहात राज्यस्तरीय भव्य वधू-वर परिचय मेळाव्याचे आयोजन करण्यात आले आहे. या मेळाव्यात उच्चशिक्षित, डॉक्टर, इंजिनिअर, शासकीय अधिकारी व व्यावसायिकांसाठी विशेष सत्र आयोजित केले जाईल. सोबतच सर्व नोंदणीकृत उमेदवारांची रंगीत माहिती पुस्तिका (E-Booklet) प्रसिद्ध केली जाणार आहे.',
-    sourceName: 'सकाळ नाशिक (Sakal)',
-    sourceUrl: 'https://www.sakal.com/nashik'
-  },
-  {
-    id: 'news-2',
-    category: 'गुणवत्ता सत्कार व जयंती',
-    title: 'संत संताजी जगनाडे महाराज स्मृती उत्सव व ५१ व्या गुणवंत विद्यार्थी सत्कार',
-    titleEn: 'Santaji Jagnade Maharaj Jayanti & Student Excellence Awards',
-    date: '28 जुलै 2026',
-    location: 'संताजी भवन, पंचवटी, नाशिक',
-    image: 'https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&q=80&w=800',
-    summary: 'नाशिक शहरातील तेली समाज युवक संघटनेतर्फे १० वी व १२ वी मध्ये उत्कृष्ट यश मिळवणाऱ्या १५० हून अधिक गुणवंत विद्यार्थ्यांचा मानपत्र व शैक्षणिक संच देऊन गौरव करण्यात आला.',
-    fullText: 'तेली समाज युवक संघटना नाशिक तर्फे संत संताजी जगनाडे महाराज जयंती निमित्त पंचवटी येथील संताजी भवनात भव्य शैक्षणिक गुणगौरव समारंभ पार पडला. याप्रसंगी नाशिक जिल्ह्यातील इयत्ता १० वी, १२ वी व पदवी परीक्षेत प्राविण्य मिळवणाऱ्या १५० हून अधिक विद्यार्थ्यांना स्मृतिचिन्ह, मानपत्र व मोफत शैक्षणिक किट वाटप करण्यात आले. समाजातील ज्येष्ठांचाही यावेळी विशेष नागरी सत्कार करण्यात आला.',
-    sourceName: 'लोकमत नाशिक (Lokmat)',
-    sourceUrl: 'https://www.lokmat.com/nashik/'
-  },
-  {
-    id: 'news-3',
-    category: 'व्यवसाय व उद्योग',
-    title: 'तेली समाज उद्योगपती व व्यावसायिक नेटवर्क समिट - नाशिक २०२६',
-    titleEn: 'Nashik Teli Samaj Entrepreneurs & Business Network Summit',
-    date: '12 जून 2026',
-    location: 'हॉटेल एक्सप्रेस इन, मुंबई-आग्रा हायवे, नाशिक',
-    image: 'https://images.unsplash.com/photo-1515187029135-18ee286d815b?auto=format&fit=crop&q=80&w=800',
-    summary: 'तेली समाजातील नवउद्योजकांना शासकीय कर्ज योजना, स्टार्टअप मार्गदर्शन व बिझनेस नेटवर्किंगसाठी नाशिकमध्ये भव्य व्यापारी परिषद यशस्वीरीत्या संपन्न.',
-    fullText: 'नाशिक तेली समाज बिझनेस फोरमच्या पुढाकाराने आयोजित व्यापारी परिषदेत १०० पेक्षा जास्त समाजबांधव उद्योजक एकत्र आले. नवीन उद्योग सुरू करू इच्छिणाऱ्या तरुणांसाठी मुद्रा कर्ज योजना, एमएसएमई सबसिडी व आंतरराष्ट्रीय व्यापाराच्या संधी याविषयी तज्ज्ञांचे मार्गदर्शन लाभले. समाजबांधवांमध्ये परस्पर व्यापार व व्यवसाय वृद्धीसाठी बिझनेस डिरेक्टरी लॉन्च करण्यात आली.',
-    sourceName: 'देशदूत नाशिक (Deshdoot)',
-    sourceUrl: 'https://deshdoot.com/'
-  },
-  {
-    id: 'news-4',
-    category: 'महिला सशक्तीकरण',
-    title: 'तेली समाज महिला मंडळ नाशिक: डिजिटल साक्षरता व गृहउद्योग कार्यशाळा',
-    titleEn: 'Teli Samaj Mahila Mandal Digital Literacy & Self-Employment Workshop',
-    date: '02 मे 2026',
-    location: 'तिळक वाडी, नाशिक',
-    image: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&q=80&w=800',
-    summary: 'महिला भगिनींसाठी ऑनलाईन व्यवहार, गृहउद्योग मार्केटिंग व आरोग्य मार्गदर्शन शिबिराचे आयोजन. मोठ्या संख्येने महिलांची उपस्थिती.',
-    fullText: 'नाशिक तेली समाज महिला मंडळाच्या वतीने टिळक वाडी येथे एकदिवसीय महिला सशक्तीकरण कार्यशाळा पार पडला. यामध्ये महिलांना ऑनलाईन बँकिंग सुरक्षितता, सोशल मीडिया मार्केटिंग, बचत गट व्यवस्थापन आणि आरोग्य तपासणीबाबत मार्गदर्शन करण्यात आले. समाजातील महिलांना स्वावलंबी बनवण्यासाठी विविध गृहउद्योगांचे मोफत प्रशिक्षण देण्याचा संकल्प जाहीर करण्यात आला.',
-    sourceName: 'महाराष्ट्र टाइम्स (MTimes)',
-    sourceUrl: 'https://www.mtimes.in/nashik'
-  },
-  {
-    id: 'news-5',
-    category: 'समाज प्रबोधन व उपक्रम',
-    title: 'नाशिक शहर तेली समाज: आरोग्य तपासणी व भव्य रक्तदान शिबीर उपक्रम',
-    titleEn: 'Nashik City Teli Samaj Free Health Checkup & Blood Donation Drive',
-    date: '18 एप्रिल 2026',
-    location: 'तेली समाज मंगल कार्यालय, सिडको, नाशिक',
-    image: 'https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?auto=format&fit=crop&q=80&w=800',
-    summary: 'सिडको नाशिक येथे आयोजित मोफत नेत्ररोग, दंतरोग व मधुमेह तपासणी शिबिरात ५०० हून अधिक समाजबांधवांनी लाभ घेतला. सोबतच १०१ बाटल्या रक्तदान गोळा.',
-    fullText: 'नाशिक शहर तेली समाजाच्या रौप्य महोत्सवी वर्षानिमित्त सिडको येथील मंगल कार्यालयात भव्य मोफत आरोग्य शिबीर व रक्तदान उपक्रम आयोजित करण्यात आला. शहरातील प्रसिद्ध निष्णात तज्ज्ञ डॉक्टरांच्या टीमने ५०० पेक्षा जास्त नागरिकांची तपासणी केली व मोफत औषध वाटप केले.',
-    sourceName: 'पुढारी न्यूज (Pudhari)',
-    sourceUrl: 'https://pudhari.news/'
-  }
-];
+import { getOrAssignProfileId, getDisplayProfileId } from '../lib/profileIdUtils';
+import { COMMUNITY_NEWS, NewsItem } from '../data/communityNewsData';
+import logoImg from '../assets/images/LOGO.jpg';
 
 interface ProfileData {
   uid: string;
+  profileId?: string;
   firstName: string;
   lastName: string;
   gender: string;
@@ -121,8 +43,73 @@ export default function Home() {
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [targetProfileForModal, setTargetProfileForModal] = useState<ProfileData | null>(null);
   const [selectedNews, setSelectedNews] = useState<NewsItem | null>(null);
+  const [homeReviews, setHomeReviews] = useState<any[]>([]);
+  
+  // Homepage Firestore Config & Community News State
+  const [homepageConfig, setHomepageConfig] = useState({
+    happyMarriagesEnabled: true,
+    happyMarriagesTitle: "Millions of Happy Marriages",
+    happyMarriagesSubtitle: '"A successful marriage requires falling in love many times, always with the same person."',
+    happyMarriagesStories: [
+      {
+        names: "Rahul & Sneha",
+        quote: "We found our perfect match through Nashik Teli Samaj Matrimony. The community focus made all the difference.",
+        image: "https://images.unsplash.com/photo-1583939003579-730e3918a45a?auto=format&fit=crop&q=80&w=400"
+      },
+      {
+        names: "Amit & Priya",
+        quote: "The verification process gave us peace of mind. Highly recommended for anyone looking for serious commitment.",
+        image: "https://images.unsplash.com/photo-1511285560929-80b456fea0bc?auto=format&fit=crop&q=80&w=400"
+      },
+      {
+        names: "Vikram & Anjali",
+        quote: "Simple, traditional, and effective. We are grateful to this platform for bringing our families together.",
+        image: "https://images.unsplash.com/photo-1595910129103-57b04739c2ff?auto=format&fit=crop&q=80&w=400"
+      }
+    ],
+    communityNewsEnabled: true
+  });
+  const [newsList, setNewsList] = useState<NewsItem[]>(COMMUNITY_NEWS);
+
   const navigate = useNavigate();
   const { t } = useTranslation();
+
+  // Subscribe to Homepage Config in Firestore
+  useEffect(() => {
+    const unsubConfig = onSnapshot(doc(db, 'config', 'homepage'), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setHomepageConfig(prev => ({
+          ...prev,
+          happyMarriagesEnabled: data.happyMarriagesEnabled !== undefined ? data.happyMarriagesEnabled : prev.happyMarriagesEnabled,
+          happyMarriagesTitle: data.happyMarriagesTitle || prev.happyMarriagesTitle,
+          happyMarriagesSubtitle: data.happyMarriagesSubtitle || prev.happyMarriagesSubtitle,
+          happyMarriagesStories: data.happyMarriagesStories && data.happyMarriagesStories.length > 0 ? data.happyMarriagesStories : prev.happyMarriagesStories,
+          communityNewsEnabled: data.communityNewsEnabled !== undefined ? data.communityNewsEnabled : prev.communityNewsEnabled
+        }));
+      }
+    }, (err) => console.warn("Homepage config listener error:", err));
+
+    const unsubNews = onSnapshot(collection(db, 'community_news'), (snapshot) => {
+      if (!snapshot.empty) {
+        const fetched: NewsItem[] = [];
+        snapshot.forEach(d => {
+          const item = { id: d.id, ...d.data() } as any;
+          if (item.published !== false) {
+            fetched.push(item);
+          }
+        });
+        if (fetched.length > 0) {
+          setNewsList(fetched);
+        }
+      }
+    }, (err) => console.warn("Community news listener error:", err));
+
+    return () => {
+      unsubConfig();
+      unsubNews();
+    };
+  }, []);
 
   useEffect(() => {
     let unsubUser: (() => void) | null = null;
@@ -136,6 +123,8 @@ export default function Home() {
           setMyProfile(uData);
           currentGender = uData.gender || '';
         }
+      }, (err) => {
+        console.warn("Error fetching user profile snapshot in Home:", err);
       });
     }
 
@@ -161,9 +150,11 @@ export default function Home() {
         const p = docSnap.data() as ProfileData;
         if (!p.status || p.status === 'approved') {
           if (!(p as any).isArchived && p.status !== 'archived') {
-            if (!user || p.uid !== user.uid) {
-              if (!currentGender || isOppositeGender(currentGender, p.gender)) {
-                profiles.push(p);
+            if ((p as any).role !== 'admin' && !(p as any).isAdmin) {
+              if (!user || p.uid !== user.uid) {
+                if (!currentGender || isOppositeGender(currentGender, p.gender)) {
+                  profiles.push(p);
+                }
               }
             }
           }
@@ -176,37 +167,62 @@ export default function Home() {
       setLoading(false);
     });
 
+    // Real-time listener for approved home reviews
+    const reviewsQ = query(collection(db, 'reviews'), where('showOnHome', '==', true));
+    const unsubReviews = onSnapshot(reviewsQ, (snap) => {
+      const items: any[] = [];
+      snap.forEach(docSnap => {
+        items.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      items.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      setHomeReviews(items);
+    }, (err) => {
+      console.error("Error fetching home reviews:", err);
+    });
+
     return () => {
       if (unsubUser) unsubUser();
       if (unsubProfiles) unsubProfiles();
+      if (unsubReviews) unsubReviews();
     };
   }, [user]);
 
-  // Auto-rotation interval for dynamic featured profiles (every 10 seconds)
+  const [batchIndex, setBatchIndex] = useState(0);
+
+  // Group eligible profiles into non-overlapping chunks of 3 for simultaneous rotation
+  const profileBatches = useMemo(() => {
+    if (allProfiles.length === 0) return [];
+    if (allProfiles.length <= 3) return [allProfiles];
+
+    const chunks: ProfileData[][] = [];
+    for (let i = 0; i < allProfiles.length; i += 3) {
+      const chunk = allProfiles.slice(i, i + 3);
+      if (chunk.length < 3 && allProfiles.length >= 3) {
+        const needed = 3 - chunk.length;
+        const fill = allProfiles.filter(p => !chunk.some(c => c.uid === p.uid)).slice(0, needed);
+        chunks.push([...chunk, ...fill]);
+      } else {
+        chunks.push(chunk);
+      }
+    }
+    return chunks;
+  }, [allProfiles]);
+
+  // Auto-rotation interval: Every 10 seconds, swap all 3 featured profiles simultaneously
   useEffect(() => {
-    if (allProfiles.length <= 3) return;
+    if (profileBatches.length <= 1) return;
     const timer = setInterval(() => {
       setIsAnimating(true);
       setTimeout(() => {
-        setCurrentIndex((prev) => (prev + 1) % allProfiles.length);
+        setBatchIndex((prev) => (prev + 1) % profileBatches.length);
         setIsAnimating(false);
       }, 500);
     }, 10000);
 
     return () => clearInterval(timer);
-  }, [allProfiles]);
+  }, [profileBatches]);
 
-  const getVisibleProfiles = () => {
-    if (allProfiles.length === 0) return [];
-    if (allProfiles.length <= 3) return allProfiles;
-    const res: ProfileData[] = [];
-    for (let i = 0; i < 3; i++) {
-      res.push(allProfiles[(currentIndex + i) % allProfiles.length]);
-    }
-    return res;
-  };
-
-  const visibleProfiles = getVisibleProfiles();
+  const visibleProfiles = profileBatches.length > 0 ? (profileBatches[batchIndex % profileBatches.length] || []) : [];
 
   const handleViewProfile = (profile: ProfileData) => {
     if (!user) {
@@ -254,8 +270,14 @@ export default function Home() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24 md:py-36 flex flex-col items-center text-center relative z-10">
           <div className="relative mb-6 group">
             <img 
-              src="/logo.jpg" 
+              src={logoImg} 
               alt="राष्ट्रीय तेली समाज स्नेह बंधन" 
+              referrerPolicy="no-referrer"
+              onError={(e) => {
+                const target = e.currentTarget;
+                target.onerror = null;
+                target.src = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120" fill="%23e05600"><circle cx="60" cy="60" r="56" fill="%23fff" stroke="%23e05600" stroke-width="8"/><text x="50%" y="55%" font-size="50" font-weight="bold" fill="%23e05600" text-anchor="middle" dominant-baseline="middle">त</text></svg>';
+              }}
               className="h-28 w-28 md:h-36 md:w-36 rounded-full object-cover border-4 border-amber-400 shadow-2xl bg-white p-1 hover:scale-105 transition-transform" 
             />
             <div className="absolute -bottom-2 bg-saffron text-white text-[10px] font-bold px-3 py-0.5 rounded-full shadow-md uppercase tracking-wider">
@@ -331,14 +353,22 @@ export default function Home() {
             <div className="text-center text-stone-500 py-12">{t('home.noFeaturedProfiles')}</div>
           ) : (
             <div className={`grid grid-cols-1 md:grid-cols-3 gap-8 transition-all duration-500 ease-in-out ${isAnimating ? 'opacity-0 scale-95' : 'opacity-100 scale-100'}`}>
-              {visibleProfiles.map(profile => (
-                <div 
-                  key={profile.uid} 
-                  onClick={() => handleViewProfile(profile)}
-                  className="bg-white rounded-2xl overflow-hidden shadow-sm border border-stone-200 hover:shadow-xl transition-all cursor-pointer group relative"
-                >
-                  <div className="aspect-[4/5] bg-stone-100 relative overflow-hidden">
-                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-saffron via-gold to-saffron z-20"></div>
+              {visibleProfiles.map(profile => {
+                const pId = getDisplayProfileId(profile);
+                return (
+                  <div 
+                    key={profile.uid} 
+                    onClick={() => handleViewProfile(profile)}
+                    className="bg-white rounded-2xl overflow-hidden shadow-sm border border-stone-200 hover:shadow-xl transition-all cursor-pointer group relative"
+                  >
+                    <div className="aspect-[4/5] bg-stone-100 relative overflow-hidden">
+                      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-saffron via-gold to-saffron z-20"></div>
+                      
+                      <div className="absolute top-3 left-3 z-10">
+                        <span className="px-2.5 py-1 rounded-full text-xs font-mono font-extrabold bg-stone-900/90 text-amber-300 shadow-md backdrop-blur-md border border-amber-400/30 tracking-wider">
+                          {pId}
+                        </span>
+                      </div>
                     {user && myProfile && profile.uid !== user.uid && profile.uid !== myProfile.uid && (
                       <button 
                         onClick={(e) => { e.stopPropagation(); toggleFavorite(profile.uid); }}
@@ -397,96 +427,103 @@ export default function Home() {
                     )}
                   </div>
                 </div>
-              ))}
+              );
+            })}
             </div>
           )}
         </div>
       </div>
 
       {/* Community News & Updates Section */}
-      <div className="py-24 bg-gradient-to-b from-stone-50 via-orange-50/40 to-stone-50 relative border-y border-saffron/10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
-          <div className="text-center mb-16">
-            <div className="inline-flex items-center gap-2 bg-saffron/10 text-saffron px-4 py-1.5 rounded-full text-sm font-bold mb-4 border border-saffron/20">
-              <Newspaper className="w-4 h-4" />
-              <span>नाशिक तेली समाज बातमी पत्र / समाज घडामोडी</span>
+      {homepageConfig.communityNewsEnabled && (
+        <div className="py-24 bg-gradient-to-b from-stone-50 via-orange-50/40 to-stone-50 relative border-y border-saffron/10">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+            <div className="text-center mb-16">
+              <div className="inline-flex items-center gap-2 bg-saffron/10 text-saffron px-4 py-1.5 rounded-full text-sm font-bold mb-4 border border-saffron/20">
+                <Newspaper className="w-4 h-4" />
+                <span>नाशिक तेली समाज बातमी पत्र / समाज घडामोडी</span>
+              </div>
+              <h2 className="text-4xl md:text-5xl font-serif font-bold text-stone-900 mb-4">
+                Community News & Updates
+              </h2>
+              <p className="text-stone-600 max-w-2xl mx-auto">
+                Real news and updates regarding Nashik Teli Samaj matrimonial meets, student awards, and community developments fetched from official news portals.
+              </p>
             </div>
-            <h2 className="text-4xl md:text-5xl font-serif font-bold text-stone-900 mb-4">
-              Community News & Updates
-            </h2>
-            <p className="text-stone-600 max-w-2xl mx-auto">
-              Real news and updates regarding Nashik Teli Samaj matrimonial meets, student awards, and community developments fetched from official news portals.
-            </p>
-          </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {COMMUNITY_NEWS.map((news) => (
-              <div 
-                key={news.id} 
-                onClick={() => setSelectedNews(news)}
-                className="bg-white rounded-3xl overflow-hidden shadow-sm border border-stone-200/80 hover:shadow-2xl transition-all duration-300 flex flex-col justify-between group cursor-pointer hover:-translate-y-1.5"
-              >
-                <div>
-                  <div className="aspect-[16/10] bg-stone-100 relative overflow-hidden">
-                    <img 
-                      src={news.image} 
-                      alt={news.title} 
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" 
-                      referrerPolicy="no-referrer"
-                    />
-                    <div className="absolute top-3 left-3 bg-saffron/90 backdrop-blur-md text-white text-[11px] font-bold px-3 py-1 rounded-full shadow-md">
-                      {news.category}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+              {newsList.map((news) => (
+                <div 
+                  key={news.id} 
+                  onClick={() => setSelectedNews(news)}
+                  className="bg-white rounded-3xl overflow-hidden shadow-sm border border-stone-200/80 hover:shadow-2xl transition-all duration-300 flex flex-col justify-between group cursor-pointer hover:-translate-y-1.5"
+                >
+                  <div>
+                    <div className="aspect-[16/10] bg-stone-100 relative overflow-hidden">
+                      <img 
+                        src={news.image} 
+                        alt={news.title} 
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" 
+                        referrerPolicy="no-referrer"
+                      />
+                      <div className="absolute top-3 left-3 bg-saffron/90 backdrop-blur-md text-white text-[11px] font-bold px-3 py-1 rounded-full shadow-md">
+                        {news.category}
+                      </div>
+                    </div>
+                    <div className="p-6">
+                      <div className="flex items-center justify-between text-stone-500 text-xs font-semibold mb-3">
+                        <div className="flex items-center gap-1.5">
+                          <Calendar className="w-3.5 h-3.5 text-saffron" />
+                          <span>{news.date}</span>
+                        </div>
+                        {news.sourceUrl && (
+                          <a
+                            href={news.sourceUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex items-center gap-1 text-[11px] font-bold text-saffron bg-orange-50 hover:bg-saffron hover:text-white px-2.5 py-1 rounded-lg border border-saffron/20 transition-all shadow-xs"
+                            title={`Visit ${news.sourceName}`}
+                          >
+                            <Globe className="w-3 h-3" />
+                            <span>{news.sourceName || 'Source'}</span>
+                            <ExternalLink className="w-2.5 h-2.5" />
+                          </a>
+                        )}
+                      </div>
+                      <h3 className="font-bold text-stone-900 text-base leading-snug mb-3 line-clamp-2 group-hover:text-saffron transition-colors">
+                        {news.title}
+                      </h3>
+                      <p className="text-stone-600 text-xs leading-relaxed line-clamp-3 mb-4">
+                        {news.summary}
+                      </p>
                     </div>
                   </div>
-                  <div className="p-6">
-                    <div className="flex items-center justify-between text-stone-500 text-xs font-semibold mb-3">
-                      <div className="flex items-center gap-1.5">
-                        <Calendar className="w-3.5 h-3.5 text-saffron" />
-                        <span>{news.date}</span>
-                      </div>
+
+                  <div className="px-6 pb-6 pt-0 flex items-center justify-between border-t border-stone-100 mt-2 pt-4">
+                    <div className="flex items-center gap-1.5 text-saffron text-xs font-bold group-hover:gap-2.5 transition-all">
+                      <span>Read Preview & Source</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </div>
+                    {news.sourceUrl && (
                       <a
                         href={news.sourceUrl}
                         target="_blank"
                         rel="noopener noreferrer"
                         onClick={(e) => e.stopPropagation()}
-                        className="inline-flex items-center gap-1 text-[11px] font-bold text-saffron bg-orange-50 hover:bg-saffron hover:text-white px-2.5 py-1 rounded-lg border border-saffron/20 transition-all shadow-xs"
-                        title={`Visit ${news.sourceName}`}
+                        className="text-[11px] font-bold text-stone-500 hover:text-stone-900 underline flex items-center gap-1"
                       >
-                        <Globe className="w-3 h-3" />
-                        <span>{news.sourceName}</span>
+                        <span>Website</span>
                         <ExternalLink className="w-2.5 h-2.5" />
                       </a>
-                    </div>
-                    <h3 className="font-bold text-stone-900 text-base leading-snug mb-3 line-clamp-2 group-hover:text-saffron transition-colors">
-                      {news.title}
-                    </h3>
-                    <p className="text-stone-600 text-xs leading-relaxed line-clamp-3 mb-4">
-                      {news.summary}
-                    </p>
+                    )}
                   </div>
                 </div>
-
-                <div className="px-6 pb-6 pt-0 flex items-center justify-between border-t border-stone-100 mt-2 pt-4">
-                  <div className="flex items-center gap-1.5 text-saffron text-xs font-bold group-hover:gap-2.5 transition-all">
-                    <span>Read Preview & Source</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </div>
-                  <a
-                    href={news.sourceUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={(e) => e.stopPropagation()}
-                    className="text-[11px] font-bold text-stone-500 hover:text-stone-900 underline flex items-center gap-1"
-                  >
-                    <span>Website</span>
-                    <ExternalLink className="w-2.5 h-2.5" />
-                  </a>
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* News Detail Modal with Source Website Link */}
       {selectedNews && (
@@ -603,7 +640,7 @@ export default function Home() {
             <div className="order-1 md:order-2 relative">
               <div className="aspect-square rounded-3xl overflow-hidden shadow-2xl border-4 border-gold/30 bg-white">
                 <img 
-                  src="/heritage_values.jpg" 
+                  src="src/assets/images/heritage_values_image_1786359545319.jpg" 
                   alt="Tel Ghana - Traditional Oil Press & Heritage" 
                   className="w-full h-full object-contain p-2"
                   referrerPolicy="no-referrer"
@@ -619,52 +656,38 @@ export default function Home() {
       </div>
 
       {/* Success Stories Section */}
-      <div className="py-24 bg-orange-50/50 relative overflow-hidden">
-        <div className="absolute inset-0 opacity-10 bg-traditional-pattern pointer-events-none"></div>
-        <div className="absolute top-0 right-0 w-64 h-64 bg-saffron/10 rounded-full -mr-32 -mt-32 blur-3xl"></div>
-        <div className="absolute bottom-0 left-0 w-64 h-64 bg-gold/10 rounded-full -ml-32 -mb-32 blur-3xl"></div>
-        
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
-          <div className="text-center mb-16">
-            <h2 className="text-4xl md:text-5xl font-serif font-bold text-stone-900 mb-6">Millions of Happy Marriages</h2>
-            <p className="text-stone-600 max-w-2xl mx-auto italic text-lg">"A successful marriage requires falling in love many times, always with the same person."</p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {[
-              {
-                names: "Rahul & Sneha",
-                quote: "We found our perfect match through Nashik Teli Samaj Matrimony. The community focus made all the difference.",
-                image: "https://images.unsplash.com/photo-1583939003579-730e3918a45a?auto=format&fit=crop&q=80&w=400"
-              },
-              {
-                names: "Amit & Priya",
-                quote: "The verification process gave us peace of mind. Highly recommended for anyone looking for serious commitment.",
-                image: "https://images.unsplash.com/photo-1511285560929-80b456fea0bc?auto=format&fit=crop&q=80&w=400"
-              },
-              {
-                names: "Vikram & Anjali",
-                quote: "Simple, traditional, and effective. We are grateful to this platform for bringing our families together.",
-                image: "https://images.unsplash.com/photo-1595910129103-57b04739c2ff?auto=format&fit=crop&q=80&w=400"
-              }
-            ].map((story, idx) => (
-              <div key={idx} className="bg-white p-8 rounded-3xl shadow-xl border border-saffron/10 hover:shadow-2xl transition-all text-center group">
-                <div className="w-28 h-28 mx-auto mb-6 rounded-full overflow-hidden border-4 border-saffron/20 group-hover:border-saffron transition-colors">
-                  <img src={story.image} alt={story.names} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                </div>
-                <h3 className="text-2xl font-bold text-stone-900 mb-3">{story.names}</h3>
-                <p className="text-stone-600 italic text-base leading-relaxed">"{story.quote}"</p>
-              </div>
-            ))}
-          </div>
+      {homepageConfig.happyMarriagesEnabled && (
+        <div className="py-24 bg-orange-50/50 relative overflow-hidden">
+          <div className="absolute inset-0 opacity-10 bg-traditional-pattern pointer-events-none"></div>
+          <div className="absolute top-0 right-0 w-64 h-64 bg-saffron/10 rounded-full -mr-32 -mt-32 blur-3xl"></div>
+          <div className="absolute bottom-0 left-0 w-64 h-64 bg-gold/10 rounded-full -ml-32 -mb-32 blur-3xl"></div>
           
-          <div className="mt-16 text-center">
-            <div className="inline-block bg-white px-10 py-6 rounded-3xl border-2 border-saffron/20 shadow-lg">
-              <p className="text-saffron font-serif italic text-xl font-bold">"Marriage is not just a union of two souls, but a union of two families and traditions."</p>
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+            <div className="text-center mb-16">
+              <h2 className="text-4xl md:text-5xl font-serif font-bold text-stone-900 mb-6">{homepageConfig.happyMarriagesTitle}</h2>
+              <p className="text-stone-600 max-w-2xl mx-auto italic text-lg">{homepageConfig.happyMarriagesSubtitle}</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+              {(homepageConfig.happyMarriagesStories || []).map((story, idx) => (
+                <div key={idx} className="bg-white p-8 rounded-3xl shadow-xl border border-saffron/10 hover:shadow-2xl transition-all text-center group">
+                  <div className="w-28 h-28 mx-auto mb-6 rounded-full overflow-hidden border-4 border-saffron/20 group-hover:border-saffron transition-colors">
+                    <img src={story.image} alt={story.names} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  </div>
+                  <h3 className="text-2xl font-bold text-stone-900 mb-3">{story.names}</h3>
+                  <p className="text-stone-600 italic text-base leading-relaxed">"{story.quote}"</p>
+                </div>
+              ))}
+            </div>
+            
+            <div className="mt-16 text-center">
+              <div className="inline-block bg-white px-10 py-6 rounded-3xl border-2 border-saffron/20 shadow-lg">
+                <p className="text-saffron font-serif italic text-xl font-bold">"Marriage is not just a union of two souls, but a union of two families and traditions."</p>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* How it Works Section */}
       <div className="py-24 bg-white border-y border-stone-100 relative">
@@ -675,7 +698,7 @@ export default function Home() {
             <p className="text-stone-500 max-w-2xl mx-auto">Finding your soulmate is simple and secure on our platform.</p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             {[
               {
                 step: "01",
@@ -694,12 +717,6 @@ export default function Home() {
                 title: "Search & Connect",
                 desc: "Use advanced filters to find matches and express interest.",
                 icon: <Search className="h-6 w-6" />
-              },
-              {
-                step: "04",
-                title: "Start Conversation",
-                desc: "Connect with families and take the next step towards a happy life.",
-                icon: <Heart className="h-6 w-6" />
               }
             ].map((item, idx) => (
               <div key={idx} className="relative p-8 rounded-3xl bg-stone-50 border border-stone-100 hover:border-saffron/30 transition-all group hover:shadow-lg">
@@ -771,6 +788,100 @@ export default function Home() {
                 <p className="text-orange-50 text-sm">Our team is here to help you at every step of your journey to find a life partner.</p>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Community Feedback & Member Reviews Section */}
+      <div className="py-20 bg-stone-900 text-white relative overflow-hidden">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+          <div className="text-center mb-14">
+            <div className="inline-flex items-center gap-2 bg-saffron/20 text-amber-300 px-4 py-1.5 rounded-full text-xs font-bold mb-4 border border-saffron/30">
+              <Star className="w-4 h-4 text-amber-400 fill-amber-400" />
+              <span>सदस्यांचे अभिप्राय (Member Reviews)</span>
+            </div>
+            <h2 className="text-3xl sm:text-4xl font-serif font-bold text-white mb-3">
+              What Our Community Members Say
+            </h2>
+            <p className="text-stone-300 text-sm max-w-2xl mx-auto">
+              Real feedback and experiences shared by families and candidates using Nashik Teli Samaj Vadhu-Var Parichay.
+            </p>
+          </div>
+
+          {homeReviews.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {homeReviews.map((rev) => (
+                <div
+                  key={rev.id}
+                  className="bg-stone-800/90 border border-stone-700/80 rounded-2xl p-6 shadow-xl flex flex-col justify-between hover:border-saffron/50 transition-all"
+                >
+                  <div className="space-y-4">
+                    {/* Stars */}
+                    <div className="flex items-center gap-1">
+                      {[1, 2, 3, 4, 5].map((s) => (
+                        <Star
+                          key={s}
+                          className={`w-4 h-4 ${
+                            s <= (rev.rating || 5)
+                              ? 'text-amber-400 fill-amber-400'
+                              : 'text-stone-600 fill-stone-700'
+                          }`}
+                        />
+                      ))}
+                    </div>
+
+                    {/* Review text */}
+                    <p className="text-stone-200 text-sm italic leading-relaxed">
+                      "{rev.reviewText}"
+                    </p>
+                  </div>
+
+                  <div className="pt-4 border-t border-stone-700/60 mt-6 flex items-center justify-between">
+                    <div>
+                      <h4 className="font-bold text-white text-sm">{rev.name}</h4>
+                      <div className="flex items-center gap-1.5 text-xs text-amber-400 font-medium mt-0.5">
+                        <ShieldCheck className="w-3.5 h-3.5" />
+                        <span>Verified Community Member</span>
+                      </div>
+                    </div>
+                    {rev.createdAt && (
+                      <span className="text-[11px] text-stone-400 font-mono">
+                        {new Date(rev.createdAt).toLocaleDateString('en-IN', {
+                          day: 'numeric',
+                          month: 'short',
+                          year: 'numeric'
+                        })}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="bg-stone-800/80 border border-stone-700 rounded-3xl p-8 max-w-xl mx-auto text-center space-y-4 shadow-xl">
+              <MessageSquare className="w-12 h-12 text-saffron mx-auto" />
+              <h3 className="text-xl font-bold text-white">Share Your Experience!</h3>
+              <p className="text-stone-300 text-sm leading-relaxed">
+                Have you found your life partner or used our platform? We would love to hear your thoughts and feedback.
+              </p>
+              <Link
+                to="/contact"
+                className="inline-flex items-center gap-2 bg-saffron text-white px-6 py-3 rounded-xl font-bold text-xs hover:bg-orange-600 transition-all shadow-md shadow-saffron/20"
+              >
+                <Star className="w-4 h-4 fill-white" />
+                <span>Submit Feedback & Review</span>
+              </Link>
+            </div>
+          )}
+
+          <div className="mt-12 text-center">
+            <Link
+              to="/contact"
+              className="inline-flex items-center gap-2 text-amber-300 hover:text-white text-xs font-bold underline transition-colors"
+            >
+              <span>Have feedback or suggestions? Click here to submit a review</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
           </div>
         </div>
       </div>

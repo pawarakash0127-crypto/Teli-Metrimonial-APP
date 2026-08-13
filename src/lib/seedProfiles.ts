@@ -1,4 +1,5 @@
 import { db, doc, setDoc } from './firebase';
+import { assignGlobalProfileIdInTransaction } from './profileIdUtils';
 
 export interface SeedAccount {
   email: string;
@@ -304,13 +305,25 @@ export async function seedSampleProfilesToFirestore(): Promise<{ count: number; 
   let seededCount = 0;
 
   try {
+    let globalSeq = 0;
     for (const account of SAMPLE_ACCOUNTS) {
-    const profileRef = doc(db, 'profiles', account.uid);
-    const userRef = doc(db, 'users', account.uid);
+      const profileRef = doc(db, 'profiles', account.uid);
+      const userRef = doc(db, 'users', account.uid);
 
-    const profileData = {
-      uid: account.uid,
-      email: account.email,
+      let profileId = '';
+      try {
+        profileId = await assignGlobalProfileIdInTransaction(account.gender);
+      } catch (err) {
+        globalSeq++;
+        const prefix = account.gender === 'Female' ? 'VADHU' : 'VAR';
+        profileId = `${prefix}-${String(globalSeq).padStart(3, '0')}`;
+      }
+
+      const profileData = {
+        uid: account.uid,
+        profileId: profileId,
+        vaduVarNumber: profileId,
+        email: account.email,
       firstName: account.firstName,
       lastName: account.lastName,
       gender: account.gender,

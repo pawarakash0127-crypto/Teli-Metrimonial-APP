@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, RecaptchaVerifier, signInWithPhoneNumber, updatePassword } from 'firebase/auth';
-import { getFirestore, collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, query, where, onSnapshot, limit } from 'firebase/firestore';
+import { getFirestore, collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, query, where, onSnapshot, limit, addDoc, runTransaction } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import firebaseConfig from '../../firebase-applet-config.json';
 
@@ -20,6 +20,7 @@ export {
   signInWithPhoneNumber,
   updatePassword,
   collection,
+  addDoc,
   doc,
   getDoc,
   getDocs,
@@ -32,5 +33,6 @@ export {
   limit,
   ref,
   uploadBytes,
-  getDownloadURL
+  getDownloadURL,
+  runTransaction
 };

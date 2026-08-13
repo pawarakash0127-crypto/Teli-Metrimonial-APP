@@ -13,6 +13,8 @@ import {
   formatHeightDisplay, 
   translateSiblingsList 
 } from '../lib/profileTranslator';
+import { getOrAssignProfileId, getDisplayProfileId } from '../lib/profileIdUtils';
+import GunaMatchingCard from '../components/GunaMatchingCard';
 
 export default function ProfileDetails() {
   const { id } = useParams<{ id: string }>();
@@ -152,7 +154,7 @@ export default function ProfileDetails() {
   const siblings = translateSiblingsList(profile.siblings, currentLang);
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-12">
+    <div className="max-w-7xl mx-auto px-4 py-12">
       {/* Top Bar with Back button and Language Switcher */}
       <div className="flex items-center justify-between mb-6">
         <button 
@@ -186,6 +188,11 @@ export default function ProfileDetails() {
             <div className="flex-grow">
               <div className="flex justify-between items-start">
                 <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="px-3 py-1 rounded-full text-xs font-mono font-extrabold bg-stone-900 text-amber-300 shadow border border-amber-400/30">
+                      ID: {getDisplayProfileId(profile)}
+                    </span>
+                  </div>
                   <h1 className="text-3xl font-bold text-stone-900 mb-3">
                     {profile.firstName} {profile.lastName}
                   </h1>
@@ -194,7 +201,7 @@ export default function ProfileDetails() {
                       {formatAgeDisplay(profile.age, currentLang)}, {formatHeightDisplay(profile.height, currentLang)}
                     </span>
                     <span className="px-4 py-1.5 bg-orange-100 text-maroon rounded-full text-sm font-bold">
-                      {translateText(profile.maritalStatus || 'Never Married', currentLang)}
+                      {translateText(profile.maritalStatus || 'Unmarried', currentLang)}
                     </span>
                     {profile.isManglik === 'Yes' && (
                       <span className="px-4 py-1.5 bg-orange-200 text-orange-900 rounded-full text-sm font-bold shadow-sm">
@@ -246,20 +253,41 @@ export default function ProfileDetails() {
                   {currentLang === 'mr' ? 'व्यवसाय व शिक्षण' : 'Professional & Education'}
                 </h2>
                 <div className="space-y-5">
+                {/* Profession */}
+                <div className="flex items-start gap-4">
+                  <div className="p-2 bg-stone-50 rounded-lg">
+                    <Briefcase className="w-5 h-5 text-stone-400" />
+                  </div>
+
+                  <div>
+                    <p className="text-xs text-stone-400 uppercase tracking-wider font-bold mb-1">
+                      {currentLang === 'mr' ? 'व्यवसाय / नोकरी' : 'Profession'}
+                    </p>
+
+                    <p className="text-stone-900 font-medium text-lg">
+                      {translateText(profile.profession, currentLang)}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Company */}
+                {profile.companyName && (
                   <div className="flex items-start gap-4">
                     <div className="p-2 bg-stone-50 rounded-lg">
                       <Briefcase className="w-5 h-5 text-stone-400" />
                     </div>
+
                     <div>
                       <p className="text-xs text-stone-400 uppercase tracking-wider font-bold mb-1">
-                        {currentLang === 'mr' ? 'व्यवसाय / नोकरी' : 'Profession'}
+                        {currentLang === 'mr' ? 'कंपनी' : 'Company'}
                       </p>
-                      <p className="text-stone-900 font-medium text-lg">{translateText(profile.profession, currentLang)}</p>
-                      {profile.companyName && (
-                        <p className="text-maroon font-medium">@{profile.companyName}</p>
-                      )}
+
+                      <p className="text-stone-900 font-medium text-lg">
+                        {profile.companyName}
+                      </p>
                     </div>
                   </div>
+                )}
                   <div className="flex items-start gap-4">
                     <div className="p-2 bg-stone-50 rounded-lg">
                       <GraduationCap className="w-5 h-5 text-stone-400" />
@@ -311,7 +339,20 @@ export default function ProfileDetails() {
                         {currentLang === 'mr' ? 'गोत्र / कुळ आणि मूळ गाव' : 'Gotra/Kul & Native'}
                       </p>
                       <p className="text-stone-900 font-medium">
-                        {translateText(profile.gotraKul, currentLang) || 'N/A'} • {translateText(profile.nativePlace, currentLang) || 'N/A'}
+                        {translateText(profile.gotraKul, currentLang) || 'N/A'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-4">
+                    <div className="p-2 bg-stone-50 rounded-lg">
+                      <MapPin className="w-5 h-5 text-stone-400" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-stone-400 uppercase tracking-wider font-bold mb-1">
+                        {currentLang === 'mr' ? 'मूळ गाव' : 'Native Place'}
+                      </p>
+                      <p className="text-stone-900 font-medium">
+                        {translateText(profile.nativePlace, currentLang) || 'N/A'}
                       </p>
                     </div>
                   </div>
@@ -339,15 +380,29 @@ export default function ProfileDetails() {
                       <p className="text-stone-900 font-medium">
                         {formatDateOfBirth(profile.dob, profile.timeOfBirth, currentLang)}
                       </p>
-                      {profile.birthplace && (
-                        <p className="text-stone-500 text-sm mt-1">
-                          {currentLang === 'mr' ? 'जन्म ठिकाण: ' : 'Place: '}{translateText(profile.birthplace, currentLang)}
-                        </p>
-                      )}
                     </div>
                   </div>
+                  <div className="flex items-start gap-4">
+                  <div className="p-2 bg-stone-50 rounded-lg">
+                    <MapPin className="w-5 h-5 text-stone-400" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-stone-400 uppercase tracking-wider font-bold mb-1">
+                      {currentLang === 'mr' ? 'जन्म ठिकाण' : 'Place of Birth'}
+                    </p>
+                    <p className="text-stone-900 font-medium">
+                      {translateText(profile.birthplace, currentLang) || 'N/A'}
+                    </p>
+                  </div>
+                </div>
                 </div>
               </div>
+                {/* Guna Milan Kundali Match Card - Positioned Below Background & Roots */}
+                {myProfile && profile && (
+                  <div className="my-8">
+                    <GunaMatchingCard myProfile={myProfile} targetProfile={profile} />
+                  </div>
+                )}
             </div>
 
             <div className="space-y-8">
@@ -392,10 +447,15 @@ export default function ProfileDetails() {
                           </p>
                         )}
                         {profile.parentsHometown && (
-                          <p className="text-stone-500 text-xs mt-2 italic text-right">
-                            {currentLang === 'mr' ? 'मूळ गाव: ' : 'Hometown: '}{translateText(profile.parentsHometown, currentLang)}
-                          </p>
-                        )}
+                        <p className="text-stone-900 text-sm flex justify-between">
+                          <span className="text-stone-500">
+                            {currentLang === 'mr' ? 'मूळ गाव' : 'Hometown'}
+                          </span>
+                          <span className="font-medium">
+                            {translateText(profile.parentsHometown, currentLang)}
+                          </span>
+                        </p>
+                      )}
                       </div>
                     </div>
                   )}
@@ -464,6 +524,7 @@ export default function ProfileDetails() {
                 </div>
               </div>
               
+
               {(profile.partnerExpectations || profile.partnerPreferences) && (
                 <div className="bg-white p-6 rounded-2xl border border-stone-100 shadow-sm hover:shadow-md transition-shadow">
                   <h2 className="text-xl font-serif font-bold text-stone-900 border-b border-saffron/20 pb-3 mb-5 flex items-center gap-2">
@@ -488,28 +549,8 @@ export default function ProfileDetails() {
 
                   {profile.partnerPreferences && (
                     <div className="space-y-4">
-                      <p className="text-xs text-stone-400 uppercase tracking-wider font-bold mb-1">
-                        {currentLang === 'mr' ? 'अपेक्षित निकष' : 'Criteria'}
-                      </p>
                       <div className="grid grid-cols-1 gap-3">
-                        {profile.partnerPreferences.preferredBirthYear && (
-                          <div className="flex items-center gap-4 bg-stone-50 p-3 rounded-xl border border-stone-100">
-                            <div className="p-2 bg-white rounded-lg shadow-sm">
-                              <Calendar className="w-5 h-5 text-saffron" />
-                            </div>
-                            <div>
-                              <p className="text-[10px] text-stone-400 uppercase font-bold">
-                                {currentLang === 'mr' ? 'अपेक्षित जन्म वर्ष' : 'Preferred Birth Year'}
-                              </p>
-                              <p className="text-stone-900 font-bold">
-                                {currentLang === 'mr' 
-                                  ? `${profile.partnerPreferences.preferredBirthYear} किंवा त्यानंतरचा जन्म`
-                                  : `${profile.partnerPreferences.preferredBirthYear} born & later`}
-                              </p>
-                            </div>
-                          </div>
-                        )}
-                        {profile.partnerPreferences.education && (
+                      {profile.partnerPreferences.education && (
                           <div className="flex items-center gap-4 bg-stone-50 p-3 rounded-xl border border-stone-100">
                             <div className="p-2 bg-white rounded-lg shadow-sm">
                               <GraduationCap className="w-5 h-5 text-saffron" />

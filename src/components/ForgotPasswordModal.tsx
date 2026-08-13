@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { db, collection, query, where, getDocs, doc, updateDoc } from '../lib/firebase';
 import { Phone, Lock, KeyRound, CheckCircle2, X, RefreshCw, ArrowLeft, Mail } from 'lucide-react';
 import FloatingToast, { ToastMessage } from './FloatingToast';
+import { findAccountByPhone } from '../lib/phoneUtils';
 
 interface ForgotPasswordModalProps {
   isOpen: boolean;
@@ -72,28 +73,8 @@ export default function ForgotPasswordModal({ isOpen, onClose, onSuccess }: Forg
 
     setLoading(true);
     try {
-      // Find matching profile/user by contact number
-      const q = query(collection(db, 'profiles'), where('contactNumber', '==', rawDigits));
-      const snap = await getDocs(q);
-
-      let userFound: any = null;
-      if (!snap.empty) {
-        userFound = snap.docs[0].data();
-      } else {
-        // Try searching in parents contact or email
-        const q2 = query(collection(db, 'profiles'), where('parentsContact', '==', rawDigits));
-        const snap2 = await getDocs(q2);
-        if (!snap2.empty) {
-          userFound = snap2.docs[0].data();
-        } else {
-          // Try users collection
-          const q3 = query(collection(db, 'users'), where('phoneNumber', '==', `+91${rawDigits}`));
-          const snap3 = await getDocs(q3);
-          if (!snap3.empty) {
-            userFound = snap3.docs[0].data();
-          }
-        }
-      }
+      // Find matching profile/user by contact number or phone using robust lookup
+      const userFound = await findAccountByPhone(phoneNumber);
 
       if (!userFound) {
         setError(`No account found registered with phone number +91 ${rawDigits}. Please check the number.`);

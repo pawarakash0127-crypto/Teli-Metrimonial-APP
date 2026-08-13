@@ -1,0 +1,39 @@
+Category,Field Name,Field Key,Requirement Level,Description & Options
+Registration,First Name,firstName,Mandatory,User's first name given during registration
+Registration,Last Name,lastName,Mandatory,User's last name / surname
+Registration,Gender,gender,Mandatory,Male or Female
+Registration,Date of Birth,dob,Mandatory,Birth date (YYYY-MM-DD) - User must be 18+ years
+Registration,Contact Number,contactNumber,Mandatory,10-digit mobile contact number
+Registration,Email Address,email,Mandatory,Valid email address used for login and notifications
+Registration,Password,password,Mandatory,Account password (min 6 characters)
+Mandatory Profile,First Name,firstName,Mandatory,User's first name
+Mandatory Profile,Last Name,lastName,Mandatory,User's last name / surname
+Mandatory Profile,Gender,gender,Mandatory,Gender selection (Male / Female)
+Mandatory Profile,Date of Birth,dob,Mandatory,Birth date (YYYY-MM-DD)
+Mandatory Profile,Father's Name,fatherName,Mandatory,Father's full name
+Mandatory Profile,Mother's Name,motherName,Mandatory,Mother's full name
+Mandatory Profile,Height,height,Mandatory,Height in feet/inches (e.g. 5'8")
+Mandatory Profile,Highest Education Level,highestEducation,Mandatory,Highest educational qualification (e.g. B.E./B.Tech, M.B.A., M.B.B.S.)
+Mandatory Profile,Profession,profession,Mandatory,Current occupation or job title
+Mandatory Profile,Current Location,location,Mandatory,Current city and state of residence
+Mandatory Profile,Native Place,nativePlace,Mandatory,Hometown / Village / Family roots
+Mandatory Profile,Gotra / Kul,gotraKul,Mandatory,Family Gotra or Kul name
+Mandatory Profile,Marital Status,maritalStatus,Mandatory,Never Married / Divorced / Widowed / Awaiting Divorce
+Mandatory Profile,Contact Number,contactNumber,Mandatory,Primary 10-digit mobile contact number
+Astrology & Kundali,Time of Birth,timeOfBirth,Required for Guna Milan,Birth time (HH:MM) for Ashtakoota 36 Guna Kundali matching
+Astrology & Kundali,Place of Birth,birthplace,Required for Guna Milan,Birth city and state for Ashtakoota 36 Guna Kundali matching
+Astrology & Kundali,Manglik Status,isManglik,Optional,No / Yes / Don't Know / Anshik (Partial)
+Optional / Advanced,Middle Name,middleName,Optional,Father's or middle name
+Optional / Advanced,Degree Specialization,degreeDetails,Optional,Specific degree or branch (e.g. Computer Science)
+Optional / Advanced,University / Institute,university,Optional,Name of college or university
+Optional / Advanced,Company Name,companyName,Optional,Current employer or business name
+Optional / Advanced,Annual Income,income,Optional,Income bracket range
+Optional / Advanced,Father's Title & Occupation,fatherTitle / fatherOccupationCompany,Optional,Father's title (Mr., Dr., Late, Shri) and occupation
+Optional / Advanced,Mother's Title & Occupation,motherTitle / motherOccupationCompany,Optional,Mother's title (Mrs., Smt., Dr., Late) and occupation
+Optional / Advanced,Parents' Hometown,parentsHometown,Optional,Hometown location of parents
+Optional / Advanced,Parents' Contact,parentsContact,Optional,Parent's phone contact number
+Optional / Advanced,Sibling Details,siblings,Optional,List of siblings (Name, Type, Occupation, Marital Status)
+Optional / Advanced,Maternal Uncle Details,maternalUncleName / maternalUncleGotraKul / maternalUnclePlace / maternalUnclePhone,Optional,Mama's name, gotra/kul, location, and phone
+Optional / Advanced,Residential Address,address,Optional,Full home address
+Optional / Advanced,Profile Photos,photoUrl / additionalPhotos,Recommended (Max 3),1 Main Profile Photo + 2 Additional Photos
+Optional / Advanced,Partner Preferences,partnerPreferences,Optional,Preferred Birth Year, Education, Location, and Expectations

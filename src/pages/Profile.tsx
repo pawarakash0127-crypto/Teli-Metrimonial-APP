@@ -1,16 +1,22 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { db, doc, getDoc, setDoc, updateDoc, storage, ref, uploadBytes, getDownloadURL, collection, query, where, getDocs, onSnapshot } from '../lib/firebase';
+import { db, doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs, onSnapshot } from '../lib/firebase';
 import { useNavigate, useParams, Link, useLocation } from 'react-router-dom';
-import { Upload, X, MapPin, Briefcase, GraduationCap, Users, Phone, User, Heart, CheckCircle, ShieldCheck, AlertCircle, KeyRound, Calendar, Trash2, RefreshCw } from 'lucide-react';
+import { Upload, X, MapPin, Briefcase, GraduationCap, Users, Phone, User, Heart, CheckCircle, ShieldCheck, AlertCircle, KeyRound, Calendar, Trash2, RefreshCw, Mail, Lock } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import ImageCarousel from '../components/ImageCarousel';
 import { validateAndFormatPhone, MANDATORY_PROFILE_FIELDS } from '../lib/phoneUtils';
 import { SAMPLE_ACCOUNTS } from '../lib/seedProfiles';
 import FloatingToast, { ToastMessage } from '../components/FloatingToast';
 import ChangePasswordModal from '../components/ChangePasswordModal';
+import CompleteProfileModal from '../components/CompleteProfileModal';
+import UploadPhotosPromptModal from '../components/UploadPhotosPromptModal';
+import AddEmailModal from '../components/AddEmailModal';
 import { sendAccountNotification } from '../lib/notificationUtils';
-import { HIGHEST_EDUCATION_CATEGORIES } from '../types';
+import { HIGHEST_EDUCATION_CATEGORIES, ANNUAL_INCOME_OPTIONS, TITLE_PREFIXES } from '../types';
+import { capitalizeWords } from '../lib/capitalizationUtils';
+import { getDisplayProfileId } from '../lib/profileIdUtils';
+import { formatHeightDisplay, formatHeightInput, translateText } from '../lib/profileTranslator';
 
 const FavoritesList = ({ favoriteIds }: { favoriteIds: string[] }) => {
   const [favorites, setFavorites] = useState<any[]>([]);
@@ -62,7 +68,7 @@ const FavoritesList = ({ favoriteIds }: { favoriteIds: string[] }) => {
               </div>
             )}
             <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-5">
-              <h3 className="text-white font-serif font-bold text-xl">{profile.firstName} {profile.lastName}</h3>
+              <h3 className="text-white font-serif font-bold text-xl">{profile.titlePrefix ? `${profile.titlePrefix} ` : ''}{profile.firstName} {profile.lastName}</h3>
               <p className="text-white/90 text-sm font-medium">{profile.age} yrs • {profile.height}</p>
             </div>
           </div>
@@ -88,6 +94,9 @@ const FavoritesList = ({ favoriteIds }: { favoriteIds: string[] }) => {
 };
 
 const ProfilePreview = ({ profile, onEdit }: { profile: any, onEdit: (section: string) => void }) => {
+  const { i18n } = useTranslation();
+  const currentLang = i18n.language || 'en';
+
   const formatTime = (timeStr: string) => {
     if (!timeStr) return '';
     try {
@@ -121,17 +130,17 @@ const ProfilePreview = ({ profile, onEdit }: { profile: any, onEdit: (section: s
           </div>
           <div className="pt-2">
             <h3 className="text-3xl font-serif font-bold text-stone-900 mb-3">
-              {profile.firstName} {profile.lastName}
+              {profile.titlePrefix ? `${profile.titlePrefix} ` : ''}{profile.firstName} {profile.middleName ? `${profile.middleName} ` : ''}{profile.lastName}
             </h3>
             <div className="flex flex-wrap gap-2.5 mb-5">
               <span className="px-4 py-1.5 bg-saffron/10 text-saffron rounded-full text-sm font-bold">
-                {profile.age} yrs • {profile.height}
+                {profile.age} yrs • {formatHeightDisplay(profile.height, currentLang)}
               </span>
               <span className="px-4 py-1.5 bg-stone-100 text-stone-700 rounded-full text-sm font-bold">
                 {profile.gender}
               </span>
               <span className="px-4 py-1.5 bg-maroon/10 text-maroon rounded-full text-sm font-bold">
-                {profile.maritalStatus || 'Never Married'}
+                {profile.maritalStatus || 'Unmarried'}
               </span>
               {profile.isManglik === 'Yes' && (
                 <span className="px-4 py-1.5 bg-orange-500 text-white rounded-full text-sm font-bold shadow-md">
@@ -171,7 +180,12 @@ const ProfilePreview = ({ profile, onEdit }: { profile: any, onEdit: (section: s
                   </div>
                   <div>
                     <p className="text-[10px] text-stone-400 uppercase font-bold tracking-wider">Education</p>
-                    <p className="text-stone-900 font-bold text-lg">{profile.education || 'N/A'}</p>
+                    <p className="text-stone-900 font-bold text-lg">
+                      {profile.highestEducation === 'Others' ? (profile.customEducation || profile.education) : (profile.highestEducation || profile.education || 'N/A')}
+                    </p>
+                    {profile.degreeDetails && profile.highestEducation !== profile.degreeDetails && (
+                      <p className="text-stone-500 text-xs font-medium">{profile.degreeDetails}</p>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-5">
@@ -180,7 +194,7 @@ const ProfilePreview = ({ profile, onEdit }: { profile: any, onEdit: (section: s
                   </div>
                   <div>
                     <p className="text-[10px] text-stone-400 uppercase font-bold tracking-wider">Annual Income</p>
-                    <p className="text-stone-900 font-bold text-lg">{profile.income || 'N/A'}</p>
+                    <p className="text-stone-900 font-bold text-lg">{profile.income || 'Not specified'}</p>
                   </div>
                 </div>
               </div>
@@ -253,19 +267,19 @@ const ProfilePreview = ({ profile, onEdit }: { profile: any, onEdit: (section: s
                       {profile.fatherName && (
                         <p className="text-stone-900 text-sm flex justify-between items-center">
                           <span className="text-stone-500 font-medium">Father's Name</span>
-                          <span className="font-bold">{profile.fatherName}</span>
+                          <span className="font-bold">{profile.fatherTitle ? `${profile.fatherTitle} ` : ''}{profile.fatherName}</span>
                         </p>
                       )}
                       {profile.motherName && (
                         <p className="text-stone-900 text-sm flex justify-between items-center">
                           <span className="text-stone-500 font-medium">Mother's Name</span>
-                          <span className="font-bold">{profile.motherName}</span>
+                          <span className="font-bold">{profile.motherTitle ? `${profile.motherTitle} ` : ''}{profile.motherName}</span>
                         </p>
                       )}
-                      {profile.parentsOccupation && (
+                      {(profile.fatherOccupationCompany || profile.parentsOccupation) && (
                         <p className="text-stone-900 text-sm flex justify-between items-center">
-                          <span className="text-stone-500 font-medium">Occupation</span>
-                          <span className="font-bold">{profile.parentsOccupation}</span>
+                          <span className="text-stone-500 font-medium">Parent Occupation</span>
+                          <span className="font-bold">{profile.fatherOccupationCompany || profile.parentsOccupation}</span>
                         </p>
                       )}
                       {profile.parentsContact && (
@@ -456,7 +470,14 @@ const ProfilePreview = ({ profile, onEdit }: { profile: any, onEdit: (section: s
 };
 
 export default function Profile() {
-  const { user, profile: authProfile, loading: authLoading } = useAuth();
+  const { 
+    user, 
+    profile: authProfile, 
+    isProfileComplete, 
+    missingMandatoryFields, 
+    profileCompletenessResult, 
+    loading: authLoading 
+  } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const { id } = useParams<{ id: string }>();
@@ -472,26 +493,34 @@ export default function Profile() {
   
   const [isEditing, setIsEditing] = useState(false);
   const [editSection, setEditSection] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'preview' | 'favorites'>('preview');
+  const [activeTab, setActiveTab] = useState<'preview' | 'account' | 'favorites'>('preview');
   const [showSuccessToast, setShowSuccessToast] = useState(false);
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isCompletionModalDismissed, setIsCompletionModalDismissed] = useState(false);
+  const [showUploadPromptModal, setShowUploadPromptModal] = useState(false);
+  const [isAddEmailModalOpen, setIsAddEmailModalOpen] = useState(false);
   const [deletionReason, setDeletionReason] = useState('');
   const [requestingDeletion, setRequestingDeletion] = useState(false);
   const [toast, setToast] = useState<ToastMessage | null>(null);
   
   const [siblings, setSiblings] = useState<{name: string, type: string, occupation: string, maritalStatus: string}[]>([]);
   
+  const targetUid = (id && authProfile?.role === 'admin') ? id : (user?.uid || '');
+
   const [formData, setFormData] = useState({
+    titlePrefix: '',
     firstName: '',
+    middleName: '',
     lastName: '',
     gender: 'Male',
     dob: '',
     timeOfBirth: '',
     birthplace: '',
-    isManglik: 'No',
+    isManglik: '',
     height: '',
-    highestEducation: 'Engineering',
+    highestEducation: '',
+    customEducation: '',
     degreeDetails: '',
     university: '',
     completionYear: '',
@@ -502,11 +531,13 @@ export default function Profile() {
     location: '',
     nativePlace: '',
     gotraKul: '',
-    maritalStatus: 'Never Married',
+    maritalStatus: '',
     fatherTitle: 'Mr.',
     fatherName: '',
     motherTitle: 'Mrs.',
     motherName: '',
+    fatherOccupationCompany: '',
+    motherOccupationCompany: '',
     parentsHometown: '',
     address: '',
     maternalUncleName: '',
@@ -516,6 +547,7 @@ export default function Profile() {
     parentsOccupation: '',
     parentsContact: '',
     contactNumber: '',
+    email: '',
     partnerExpectations: '',
     photoUrl: '',
     additionalPhotos: [] as string[],
@@ -533,8 +565,7 @@ export default function Profile() {
       return;
     }
 
-    if (!user) return;
-    const targetUid = id && authProfile?.role === 'admin' ? id : user.uid;
+    if (!user || !targetUid) return;
     const docRef = doc(db, 'profiles', targetUid);
 
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
@@ -555,6 +586,7 @@ export default function Profile() {
         setFormData(prev => ({
           ...prev,
           ...data,
+          email: data.email || user.email || '',
           contactNumber: extract10Digits(data.contactNumber),
           parentsContact: extract10Digits(data.parentsContact),
           maternalUnclePhone: extract10Digits(data.maternalUnclePhone),
@@ -575,12 +607,10 @@ export default function Profile() {
           }
         }
       } else {
-        // Doc snap does not exist for targetUid. Check if there is profile data matching user's email
         (async () => {
           let foundData: any = null;
           if (user.email) {
             const userEmailLower = user.email.toLowerCase();
-            // 1. Search Firestore profiles by email
             try {
               const q = query(collection(db, 'profiles'), where('email', '==', userEmailLower));
               const snap = await getDocs(q);
@@ -589,26 +619,6 @@ export default function Profile() {
               }
             } catch (err) {
               console.error("Error searching profiles by email:", err);
-            }
-
-            // 2. Search SAMPLE_ACCOUNTS if not in Firestore
-            if (!foundData) {
-              const sample = SAMPLE_ACCOUNTS.find(a => a.email.toLowerCase() === userEmailLower);
-              if (sample) {
-                foundData = {
-                  ...sample,
-                  status: 'approved',
-                  isFeatured: true,
-                  createdAt: new Date().toISOString(),
-                  partnerPreferences: {
-                    ageMin: sample.age - 5 > 18 ? sample.age - 5 : 18,
-                    ageMax: sample.age + 5,
-                    education: '',
-                    profession: '',
-                    location: ''
-                  }
-                };
-              }
             }
           }
 
@@ -698,7 +708,6 @@ export default function Profile() {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
 
-    // Strict numeric filtering for phone numbers (max 10 digits)
     if (name === 'contactNumber' || name === 'parentsContact' || name === 'maternalUnclePhone') {
       const numericOnly = value.replace(/[^\d]/g, '').slice(0, 10);
       setFormData(prev => ({ ...prev, [name]: numericOnly }));
@@ -711,7 +720,7 @@ export default function Profile() {
         ...prev,
         partnerPreferences: {
           ...prev.partnerPreferences,
-          [prefName]: prefName === 'ageMin' || prefName === 'ageMax' ? parseInt(value) || 0 : value
+          [prefName]: value
         }
       }));
     } else {
@@ -858,28 +867,33 @@ export default function Profile() {
     try {
       // 1. Mandatory Fields Validation
       for (const field of MANDATORY_PROFILE_FIELDS) {
-        const val = formData[field.key as keyof typeof formData];
+        let val = formData[field.key as keyof typeof formData];
+        if (field.key === 'education') {
+          val = formData.education || formData.highestEducation || formData.customEducation || formData.degreeDetails;
+        } else if (field.key === 'gotraKul') {
+          val = formData.gotraKul || (formData as any).gotra;
+        }
+
         if (!val || String(val).trim() === '') {
-          const fieldLabel = t(`profile.${field.key}`, field.label);
+          const fieldLabel = field.key === 'education' ? 'Education' : t(`profile.${field.key}`, field.label);
           const errMsg = `Please fill in required field: ${fieldLabel}`;
           setMessage({ type: 'error', text: errMsg });
           setSaving(false);
-          focusAndHighlightElement(field.key);
-          return; // STOP submission immediately!
+          focusAndHighlightElement(field.key === 'education' ? 'highestEducation' : field.key);
+          return;
         }
       }
 
-      // 2. Strict Phone Validation (+91 & 10 numeric digits)
+      // 2. Strict Phone Validation
       const phoneResult = validateAndFormatPhone(formData.contactNumber);
       if (!phoneResult.isValid) {
         const errMsg = `Contact Number error: ${phoneResult.error || 'Must be a valid 10-digit mobile number.'}`;
         setMessage({ type: 'error', text: errMsg });
         setSaving(false);
         focusAndHighlightElement('contactNumber');
-        return; // STOP submission immediately!
+        return;
       }
 
-      // Format optional phones if entered
       let formattedParentsContact = '';
       if (formData.parentsContact && formData.parentsContact.trim()) {
         const pcDigits = formData.parentsContact.replace(/[^\d]/g, '');
@@ -917,23 +931,35 @@ export default function Profile() {
       const targetUid = id && authProfile?.role === 'admin' ? id : user.uid;
       const isAdminEditing = id && authProfile?.role === 'admin';
 
-      const syncedEducation = formData.degreeDetails 
-        ? `${formData.degreeDetails}${formData.highestEducation ? ` (${formData.highestEducation})` : ''}` 
-        : (formData.highestEducation || formData.education || '');
+      const syncedEducation = formData.highestEducation === 'Others' 
+        ? (formData.customEducation || formData.degreeDetails || 'Graduate')
+        : `${formData.highestEducation}${formData.degreeDetails ? ` - ${formData.degreeDetails}` : ''}`;
 
-      // Clean up data before saving
+      // Apply intelligent capitalization
       const profileData: any = {
         ...formData,
+        firstName: capitalizeWords(formData.firstName),
+        middleName: capitalizeWords(formData.middleName),
+        lastName: capitalizeWords(formData.lastName),
+        fatherName: capitalizeWords(formData.fatherName),
+        motherName: capitalizeWords(formData.motherName),
+        location: capitalizeWords(formData.location),
+        nativePlace: capitalizeWords(formData.nativePlace),
+        birthplace: capitalizeWords(formData.birthplace),
+        maternalUncleName: capitalizeWords(formData.maternalUncleName),
+        maternalUnclePlace: capitalizeWords(formData.maternalUnclePlace),
+        parentsHometown: capitalizeWords(formData.parentsHometown),
         education: syncedEducation,
-        highestEducation: formData.highestEducation || 'Engineering',
+        highestEducation: formData.highestEducation || 'B.E. / B.Tech.',
+        income: formData.income || 'Prefer not to say',
         contactNumber: phoneResult.formatted,
         parentsContact: formattedParentsContact,
         maternalUnclePhone: formattedUnclePhone,
         uid: targetUid,
         age,
         siblings: JSON.stringify(siblings.filter(s => s.name.trim() !== '')),
-        // Keep original status or default to approved so preference updates don't reset approved status
         status: originalStatus || 'approved',
+        profileCompleted: true,
         updatedAt: new Date().toISOString()
       };
 
@@ -954,23 +980,28 @@ export default function Profile() {
         });
       }
       
-      // Immediately update local form state so UI reflects instantly
       setFormData({
         ...profileData,
         contactNumber: phoneResult.raw10
       });
-      setMessage({ type: 'success', text: isAdminEditing ? 'Profile updated successfully!' : 'Profile saved successfully! It is pending admin approval.' });
+      setMessage({ type: 'success', text: isAdminEditing ? 'Profile updated successfully!' : 'Profile saved successfully!' });
       
       setIsEditing(false);
-      setShowSuccessToast(true);
-      setTimeout(() => setShowSuccessToast(false), 3000);
+      
+      const totalPhotosUploaded = (profileData.photoUrl ? 1 : 0) + (profileData.additionalPhotos ? profileData.additionalPhotos.length : 0);
+      if (totalPhotosUploaded === 0) {
+        setShowUploadPromptModal(true);
+      } else {
+        setShowSuccessToast(true);
+        setTimeout(() => setShowSuccessToast(false), 3000);
+      }
       
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (error: any) {
       console.error("Error saving profile:", error);
       let errMsg = error.message || 'Failed to save profile.';
       if (errMsg.includes('permission') || errMsg.includes('Missing or insufficient')) {
-        errMsg = 'Permission error saving profile. Please ensure all required fields (First Name, Last Name, Date of Birth, Gender, Contact Number) are correctly completed.';
+        errMsg = 'Permission error saving profile. Please ensure all required fields are correctly completed.';
       }
       setMessage({ type: 'error', text: errMsg });
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -986,15 +1017,18 @@ export default function Profile() {
       const pRef = doc(db, 'profiles', user.uid);
       const uRef = doc(db, 'users', user.uid);
 
+      const nowIso = new Date().toISOString();
       await updateDoc(pRef, {
         deletionRequested: true,
         deletionReason: deletionReason.trim() || 'No reason provided',
-        deletionRequestedAt: new Date().toISOString(),
+        deletionRequestedAt: nowIso,
+        deletionDate: nowIso,
         status: 'deletion_pending'
       });
 
       await updateDoc(uRef, {
-        deletionRequested: true
+        deletionRequested: true,
+        deletionDate: nowIso
       });
 
       sendAccountNotification('deletion_request', {
@@ -1088,11 +1122,92 @@ export default function Profile() {
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-12">
-      {/* Floating Toast Notification */}
       <FloatingToast 
         message={message.text ? { type: message.type as any, text: message.text } : null} 
         onClose={() => setMessage({ type: '', text: '' })} 
       />
+
+      {/* Floating Modal for Mandatory Profile Completion */}
+      {authProfile?.role !== 'admin' && (
+        <CompleteProfileModal
+          isOpen={!isProfileComplete && !isCompletionModalDismissed}
+          onClose={() => setIsCompletionModalDismissed(true)}
+          onStartCompleting={() => {
+            setIsCompletionModalDismissed(true);
+            setIsEditing(true);
+            setTimeout(() => {
+              const el = document.getElementById('mandatory-fields-section') || document.querySelector('form');
+              if (el) el.scrollIntoView({ behavior: 'smooth' });
+            }, 100);
+          }}
+          missingFields={missingMandatoryFields}
+          completedCount={profileCompletenessResult?.completedCount || 0}
+          totalCount={profileCompletenessResult?.totalCount || MANDATORY_PROFILE_FIELDS.length}
+          percentage={profileCompletenessResult?.percentage || 0}
+        />
+      )}
+
+      {/* Upload Photos Prompt Modal */}
+      <UploadPhotosPromptModal
+        isOpen={showUploadPromptModal}
+        onClose={() => setShowUploadPromptModal(false)}
+        onUploadNow={() => {
+          setIsEditing(true);
+          setTimeout(() => {
+            const el = document.getElementById('photo-upload') || fileInputRef.current;
+            if (el) {
+              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              if (typeof el.click === 'function') el.click();
+            }
+          }, 200);
+        }}
+        photosCount={(formData.photoUrl ? 1 : 0) + (formData.additionalPhotos ? formData.additionalPhotos.length : 0)}
+      />
+
+      {/* Prominent Banner when Profile is Incomplete */}
+      {authProfile?.role !== 'admin' && !isProfileComplete && (
+        <div className="bg-gradient-to-r from-amber-50 to-orange-50 border-2 border-saffron/50 p-6 rounded-3xl mb-8 shadow-lg">
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div className="flex items-start gap-4">
+              <div className="p-3 bg-saffron text-white rounded-2xl shrink-0 mt-0.5 shadow-md">
+                <AlertCircle className="w-7 h-7" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-xl font-serif font-bold text-stone-900">
+                  Mandatory Profile Completion Required
+                </h3>
+                <p className="text-sm text-stone-700 leading-relaxed">
+                  Please complete all mandatory details below to get better matches and unlock full access to Home, Profile Search, and Matching pages.
+                </p>
+                {missingMandatoryFields.length > 0 && (
+                  <div className="pt-2 flex flex-wrap items-center gap-1.5">
+                    <span className="text-xs font-bold text-stone-500 uppercase tracking-wider">Remaining Mandatory Details ({missingMandatoryFields.length}):</span>
+                    {missingMandatoryFields.map(f => (
+                      <span key={f.key} className="bg-white border border-amber-300 text-amber-900 text-xs font-bold px-2.5 py-1 rounded-lg shadow-2xs">
+                        {f.label} *
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            {!isEditing && (
+              <button
+                onClick={() => {
+                  setIsEditing(true);
+                  setTimeout(() => {
+                    const el = document.getElementById('mandatory-fields-section') || document.querySelector('form');
+                    if (el) el.scrollIntoView({ behavior: 'smooth' });
+                  }, 100);
+                }}
+                className="bg-saffron hover:bg-orange-600 text-white font-bold px-6 py-3.5 rounded-2xl shadow-lg shadow-saffron/20 transition-all text-sm whitespace-nowrap self-stretch md:self-auto active:scale-95"
+              >
+                Complete Profile Now
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Admin User Account Card */}
       {authProfile?.role === 'admin' && !id && (
@@ -1105,7 +1220,7 @@ export default function Profile() {
             </div>
           </div>
           <p className="text-sm text-stone-300 mb-6 leading-relaxed">
-            As an Administrator, you do not need a personal matrimonial profile to manage the site. You can review pending member registrations, manage user profiles, and add admin users.
+            As an Administrator, you can review pending member registrations, manage user profiles, and view contact queries.
           </p>
           <div className="flex flex-wrap items-center gap-4">
             <Link to="/admin" className="bg-saffron hover:bg-orange-600 text-white font-bold px-6 py-3 rounded-2xl shadow-md text-sm transition-all">
@@ -1116,56 +1231,167 @@ export default function Profile() {
       )}
 
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
-        <h1 className="text-3xl font-serif font-bold text-stone-900">
-          {id && authProfile?.role === 'admin' 
-            ? 'Edit Member Profile' 
-            : (authProfile?.role === 'admin' ? t('profile.adminProfileTitle', 'My Profile') : t('profile.title', 'My Matrimonial Profile'))}
-        </h1>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+          <h1 className="text-3xl font-serif font-bold text-stone-900">
+            {id && authProfile?.role === 'admin' 
+              ? 'Edit Member Profile' 
+              : (authProfile?.role === 'admin' ? t('profile.adminProfileTitle', 'My Profile') : t('profile.title', 'My Matrimonial Profile'))}
+          </h1>
+          <div className="bg-saffron text-white px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-extrabold font-mono inline-flex items-center gap-1.5 shadow-md shrink-0 w-fit">
+            <ShieldCheck className="w-4 h-4 text-amber-200" />
+            <span>ID:</span>
+            <span className="font-black tracking-wide">{(formData as any).vaduVarNumber || formData.profileId || getDisplayProfileId(formData)}</span>
+          </div>
+        </div>
         
         {originalCreatedAt && (
           <div className="flex flex-wrap gap-2">
             <div className="flex bg-stone-100 p-1 rounded-xl">
               <button
                 onClick={() => setActiveTab('preview')}
-                className={`px-6 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === 'preview' ? 'bg-white text-saffron shadow-sm' : 'text-stone-600 hover:text-stone-900'}`}
+                className={`px-5 py-2 rounded-lg text-sm font-bold transition-colors ${activeTab === 'preview' ? 'bg-white text-saffron shadow-sm' : 'text-stone-600 hover:text-stone-900'}`}
               >
                 My Profile
               </button>
               <button
+                onClick={() => setActiveTab('account')}
+                className={`px-5 py-2 rounded-lg text-sm font-bold transition-colors flex items-center gap-1.5 ${activeTab === 'account' ? 'bg-white text-saffron shadow-sm' : 'text-stone-600 hover:text-stone-900'}`}
+              >
+                <User className="w-4 h-4" />
+                Account Details
+              </button>
+              <button
                 onClick={() => setActiveTab('favorites')}
-                className={`px-6 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'favorites' ? 'bg-white text-saffron shadow-sm' : 'text-stone-600 hover:text-stone-900'}`}
+                className={`px-5 py-2 rounded-lg text-sm font-bold transition-colors flex items-center gap-1.5 ${activeTab === 'favorites' ? 'bg-white text-saffron shadow-sm' : 'text-stone-600 hover:text-stone-900'}`}
               >
                 <Heart className="w-4 h-4" />
                 Favorites
               </button>
             </div>
             <Link
-              to={`/profile/${user?.uid}`}
-              className="px-5 py-2 bg-saffron/10 text-saffron rounded-xl text-sm font-medium hover:bg-saffron/20 transition-colors flex items-center gap-2"
+              to={`/profile/${targetUid}`}
+              className="px-4 py-2 bg-saffron/10 text-saffron rounded-xl text-sm font-bold hover:bg-saffron/20 transition-colors flex items-center gap-2"
             >
               <User className="w-4 h-4" />
-              View Public Profile
+              Public View
             </Link>
-            <button
-              type="button"
-              onClick={() => setIsPasswordModalOpen(true)}
-              className="px-4 py-2 bg-stone-100 hover:bg-stone-200 text-stone-800 rounded-xl text-sm font-bold transition-all flex items-center gap-2 border border-stone-200 shadow-sm"
-            >
-              <KeyRound className="w-4 h-4 text-saffron" />
-              Change Password
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setIsDeleteModalOpen(true)}
-              className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl text-sm font-bold transition-all flex items-center gap-2 border border-red-200 shadow-sm"
-            >
-              <Trash2 className="w-4 h-4 text-red-600" />
-              Delete Account
-            </button>
           </div>
         )}
       </div>
+
+      {/* Account Details View */}
+      {!isEditing && activeTab === 'account' && (
+        <div className="bg-white rounded-3xl p-8 border-2 border-stone-200/80 shadow-md space-y-8">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-stone-100 pb-6 gap-4">
+            <div className="flex items-center gap-4">
+              <div className="p-4 bg-orange-50 text-saffron rounded-2xl">
+                <User className="w-8 h-8" />
+              </div>
+              <div>
+                <h3 className="text-2xl font-serif font-bold text-stone-900">
+                  {formData.firstName} {formData.lastName}
+                </h3>
+                <div className="flex flex-wrap items-center gap-2 mt-1">
+                  <span className="text-xs font-mono bg-stone-100 text-stone-600 px-2.5 py-0.5 rounded-md">UID: {targetUid}</span>
+                  <span className="text-xs font-mono font-bold bg-saffron/10 text-saffron px-2.5 py-0.5 rounded-md border border-saffron/30">
+                    ID: {(formData as any).vaduVarNumber || formData.profileId || getDisplayProfileId(formData)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsPasswordModalOpen(true)}
+                className="px-4 py-2.5 bg-saffron text-white rounded-xl text-xs font-bold hover:bg-orange-600 transition-all shadow-md flex items-center gap-2"
+              >
+                <KeyRound className="w-4 h-4" />
+                Change Password
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsDeleteModalOpen(true)}
+                className="px-4 py-2.5 bg-red-50 text-red-700 hover:bg-red-100 rounded-xl text-xs font-bold transition-all border border-red-200 flex items-center gap-2"
+              >
+                <Trash2 className="w-4 h-4 text-red-600" />
+                Delete Account
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
+            <div className="p-5 bg-stone-50 rounded-2xl border border-stone-100 space-y-2">
+              <span className="text-stone-400 font-bold text-xs uppercase block">Matrimonial Profile ID (Vadu / Var ID)</span>
+              <span className="font-mono font-black text-saffron text-lg block">
+                {(formData as any).vaduVarNumber || formData.profileId || getDisplayProfileId(formData)}
+              </span>
+            </div>
+
+            <div className="p-5 bg-stone-50 rounded-2xl border border-stone-100 space-y-2">
+              <span className="text-stone-400 font-bold text-xs uppercase block">Registered Email</span>
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-stone-900">{formData.email || user?.email || 'Not Provided'}</span>
+                {formData.email || user?.email ? (
+                  formData.isEmailVerified ? (
+                    <span className="bg-emerald-100 text-emerald-800 text-xs px-2.5 py-1 rounded-full font-bold flex items-center gap-1">
+                      <CheckCircle className="w-3 h-3 text-emerald-600" /> Verified
+                    </span>
+                  ) : (
+                    <span className="bg-amber-100 text-amber-800 text-xs px-2.5 py-1 rounded-full font-bold">Unverified</span>
+                  )
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setIsAddEmailModalOpen(true)}
+                    className="bg-saffron hover:bg-orange-600 text-white font-bold px-3 py-1.5 rounded-xl text-xs shadow-xs transition-all flex items-center gap-1"
+                  >
+                    <Mail className="w-3.5 h-3.5" />
+                    + Add Email
+                  </button>
+                )}
+              </div>
+              {(!formData.email && !user?.email) && (
+                <div className="pt-1">
+                  <p className="text-xs text-amber-700 font-medium">No email address is linked. Click above to add an email.</p>
+                </div>
+              )}
+            </div>
+
+            <div className="p-5 bg-stone-50 rounded-2xl border border-stone-100 space-y-2">
+              <span className="text-stone-400 font-bold text-xs uppercase block">Registered Mobile (Marriage Contact)</span>
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-stone-900">
+                  {formData.contactNumber ? `+91 ${formData.contactNumber}` : 'N/A'}
+                </span>
+                {formData.isPhoneVerified ? (
+                  <span className="bg-emerald-100 text-emerald-800 text-xs px-2.5 py-1 rounded-full font-bold flex items-center gap-1">
+                    <CheckCircle className="w-3 h-3 text-emerald-600" /> Verified
+                  </span>
+                ) : (
+                  <span className="bg-stone-200 text-stone-700 text-xs px-2.5 py-1 rounded-full font-bold">SMS Mobile</span>
+                )}
+              </div>
+            </div>
+
+            <div className="p-5 bg-stone-50 rounded-2xl border border-stone-100 space-y-2">
+              <span className="text-stone-400 font-bold text-xs uppercase block">Account Status</span>
+              <span className={`inline-block font-bold text-xs px-3 py-1 rounded-full uppercase ${
+                formData.status === 'approved' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+              }`}>
+                {formData.status || 'Approved'}
+              </span>
+            </div>
+
+            <div className="p-5 bg-stone-50 rounded-2xl border border-stone-100 space-y-2">
+              <span className="text-stone-400 font-bold text-xs uppercase block">Registration Date</span>
+              <span className="font-bold text-stone-900">
+                {originalCreatedAt ? new Date(originalCreatedAt).toLocaleDateString('en-GB') : 'N/A'}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {(((formData as any).isArchived || formData.status === 'archived')) && (
         <div className="bg-red-600 text-white p-6 rounded-3xl mb-8 shadow-2xl border-2 border-red-400 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
@@ -1176,9 +1402,7 @@ export default function Profile() {
             <div>
               <h3 className="font-serif font-bold text-xl text-white">Profile Archived / Scheduled For Deletion</h3>
               <p className="text-sm text-white/95 mt-1 font-medium leading-relaxed">
-                Your profile was archived on {((formData as any).archivedAt ? new Date((formData as any).archivedAt) : new Date()).toLocaleDateString()}. It is currently hidden from search and other members. You have <span className="font-extrabold underline text-amber-200">
-                {Math.max(0, 30 - Math.floor((Date.now() - new Date((formData as any).archivedAt || Date.now()).getTime()) / (1000 * 60 * 60 * 24)))} days remaining
-                </span> to recover your profile before permanent removal.
+                Your profile was archived on {((formData as any).archivedAt ? new Date((formData as any).archivedAt) : new Date()).toLocaleDateString()}. It is currently hidden from search and other members.
               </p>
             </div>
           </div>
@@ -1195,17 +1419,31 @@ export default function Profile() {
       )}
 
       {((formData as any).deletionRequested || formData.status === 'deletion_pending') && (
-        <div className="bg-amber-50 border-2 border-amber-300 text-amber-900 p-5 rounded-2xl mb-8 flex items-center justify-between shadow-sm">
+        <div className="bg-amber-50 border-2 border-amber-300 text-amber-900 p-5 rounded-2xl mb-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm">
           <div className="flex items-center gap-3">
             <AlertCircle className="w-6 h-6 text-amber-600 shrink-0" />
             <div>
               <h4 className="font-bold text-base">Account Deletion Pending Review</h4>
-              <p className="text-xs text-amber-800 font-medium">You have submitted an account removal request. An administrator will review and process it shortly.</p>
+              <p className="text-xs text-amber-800 font-medium">
+                You have submitted an account removal request.
+              </p>
+              <div className="mt-1 flex items-center gap-2">
+                <span className="bg-amber-200 text-amber-900 text-xs font-black px-2.5 py-0.5 rounded-full border border-amber-300">
+                  ⏱️ {(() => {
+                    const dDate = (formData as any).deletionDate || (formData as any).deletionRequestedAt || (formData as any).archivedAt;
+                    if (!dDate) return '30 / 30 Days Remaining';
+                    const passed = Math.floor((Date.now() - new Date(dDate).getTime()) / (1000 * 60 * 60 * 24));
+                    const rem = Math.max(0, 30 - passed);
+                    return `${rem} / 30 Days Remaining`;
+                  })()}
+                </span>
+                <span className="text-[11px] text-amber-700">Decreasing automatically day by day</span>
+              </div>
             </div>
           </div>
           <button 
             onClick={handleCancelDeletionRequest}
-            className="px-4 py-2 bg-white text-amber-900 font-bold text-xs rounded-xl border border-amber-300 hover:bg-amber-100 transition-all shadow-xs"
+            className="px-4 py-2 bg-white text-amber-900 font-bold text-xs rounded-xl border border-amber-300 hover:bg-amber-100 transition-all shadow-xs shrink-0"
           >
             Cancel Request
           </button>
@@ -1255,12 +1493,12 @@ export default function Profile() {
                   <button type="button" onClick={() => setMessage({ type: '', text: '' })} className="text-red-600 hover:text-red-900 font-bold text-xs underline">Dismiss</button>
                 </div>
               )}
+
         {/* Profile Photo */}
         {(!editSection || editSection === 'photos') && (
         <div id="photos">
           <h2 className="text-xl font-serif font-bold text-maroon mb-4 border-b-2 border-saffron/20 pb-2">Profile Photos (Max 3)</h2>
           <div className="flex flex-wrap items-start gap-6">
-            {/* Main Photo */}
             <div className="flex flex-col items-center gap-2">
               <div className="relative h-32 w-32 rounded-3xl overflow-hidden bg-stone-100 border-4 border-white shadow-md flex-shrink-0">
                 {formData.photoUrl ? (
@@ -1285,7 +1523,6 @@ export default function Profile() {
               </div>
             </div>
 
-            {/* Additional Photos */}
             {formData.additionalPhotos?.map((photo, index) => (
               <div key={index} className="flex flex-col items-center gap-2">
                 <div className="relative h-24 w-24 rounded-2xl overflow-hidden bg-stone-100 border-2 border-white shadow-sm flex-shrink-0 mt-4">
@@ -1308,7 +1545,6 @@ export default function Profile() {
               </div>
             ))}
 
-            {/* Upload Button */}
             {(!formData.photoUrl || (formData.additionalPhotos && formData.additionalPhotos.length < 2)) && (
               <div className="mt-8">
                 <input 
@@ -1338,8 +1574,21 @@ export default function Profile() {
           <h2 className="text-xl font-serif font-bold text-maroon mb-4 border-b-2 border-saffron/20 pb-2">{t('profile.personalInfo')}</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
+              <label className="block text-sm font-bold text-stone-700 mb-1">Title / Prefix</label>
+              <select name="titlePrefix" value={formData.titlePrefix} onChange={handleChange} className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 border bg-white transition-all">
+                <option value="">None</option>
+                {TITLE_PREFIXES.map(prefix => (
+                  <option key={prefix} value={prefix}>{prefix}</option>
+                ))}
+              </select>
+            </div>
+            <div>
               <label className="block text-sm font-bold text-stone-700 mb-1">{t('profile.firstName')} *</label>
               <input required type="text" name="firstName" value={formData.firstName} onChange={handleChange} className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 border transition-all" />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-stone-700 mb-1">Middle Name</label>
+              <input type="text" name="middleName" value={formData.middleName} onChange={handleChange} className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 border transition-all" />
             </div>
             <div>
               <label className="block text-sm font-bold text-stone-700 mb-1">{t('profile.lastName')} *</label>
@@ -1357,7 +1606,7 @@ export default function Profile() {
               <input required type="date" name="dob" value={formData.dob} onChange={handleChange} className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 border transition-all" />
             </div>
             <div>
-              <label className="block text-sm font-bold text-stone-700 mb-1">{t('profile.timeOfBirth')}</label>
+              <label className="block text-sm font-bold text-stone-700 mb-1">{t('profile.timeOfBirth')} *</label>
               <input type="time" name="timeOfBirth" value={formData.timeOfBirth} onChange={handleChange} className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 border transition-all" />
             </div>
             <div>
@@ -1366,12 +1615,26 @@ export default function Profile() {
             </div>
             <div>
               <label className="block text-sm font-bold text-stone-700 mb-1">{t('profile.height')} *</label>
-              <input required type="text" name="height" placeholder="e.g., 5'8&quot;" value={formData.height} onChange={handleChange} className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 border transition-all" />
+              <input 
+                required 
+                type="text" 
+                name="height" 
+                placeholder="e.g. 5'4 (displays as 5ft 4inc)" 
+                value={formData.height} 
+                onChange={handleChange} 
+                onBlur={(e) => {
+                  const formatted = formatHeightInput(e.target.value);
+                  setFormData((prev: any) => ({ ...prev, height: formatted }));
+                }}
+                className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 border transition-all" 
+              />
+              <p className="text-[11px] text-stone-500 mt-1">Type e.g. 5'4 or 54 or 5.4. Displays as 5ft 4inc.</p>
             </div>
             <div>
               <label className="block text-sm font-bold text-stone-700 mb-1">{t('profile.maritalStatus')} *</label>
-              <select required name="maritalStatus" value={formData.maritalStatus} onChange={handleChange} className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 border bg-white transition-all">
-                <option value="Never Married">Never Married</option>
+              <select required name="maritalStatus" value={formData.maritalStatus || ''} onChange={handleChange} className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 border bg-white transition-all">
+                <option value="">-- Select Marital Status --</option>
+                <option value="Unmarried">Unmarried</option>
                 <option value="Divorced">Divorced</option>
                 <option value="Widowed">Widowed</option>
                 <option value="Awaiting Divorce">Awaiting Divorce</option>
@@ -1383,7 +1646,8 @@ export default function Profile() {
             </div>
             <div>
               <label className="block text-sm font-bold text-stone-700 mb-1">Manglik Status *</label>
-              <select required name="isManglik" value={formData.isManglik} onChange={handleChange} className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 border bg-white transition-all">
+              <select required name="isManglik" value={formData.isManglik || ''} onChange={handleChange} className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 border bg-white transition-all">
+                <option value="">-- Select Manglik Status --</option>
                 <option value="No">No</option>
                 <option value="Yes">Yes</option>
                 <option value="Don't Know">Don't Know</option>
@@ -1404,23 +1668,36 @@ export default function Profile() {
               <select 
                 required 
                 name="highestEducation" 
-                value={formData.highestEducation || 'Engineering'} 
+                value={formData.highestEducation || ''} 
                 onChange={handleChange} 
                 className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 border bg-white transition-all font-medium"
               >
+                <option value="">-- Select Highest Education Level --</option>
                 {HIGHEST_EDUCATION_CATEGORIES.map(cat => (
                   <option key={cat} value={cat}>{cat}</option>
                 ))}
               </select>
             </div>
+            {formData.highestEducation === 'Others' && (
+              <div>
+                <label className="block text-sm font-bold text-stone-700 mb-1">Custom Education Degree *</label>
+                <input 
+                  type="text" 
+                  name="customEducation" 
+                  placeholder="Specify custom qualification" 
+                  value={formData.customEducation || ''} 
+                  onChange={handleChange} 
+                  className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 border transition-all" 
+                />
+              </div>
+            )}
             <div>
-              <label className="block text-sm font-bold text-stone-700 mb-1">Degree / Specialization *</label>
+              <label className="block text-sm font-bold text-stone-700 mb-1">Degree / Specialization</label>
               <input 
-                required 
                 type="text" 
                 name="degreeDetails" 
-                placeholder="e.g., B.E. Computer Science, B.Tech Electrical" 
-                value={formData.degreeDetails || formData.education || ''} 
+                placeholder="e.g., Computer Science" 
+                value={formData.degreeDetails || ''} 
                 onChange={handleChange} 
                 className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 border transition-all" 
               />
@@ -1430,7 +1707,7 @@ export default function Profile() {
               <input 
                 type="text" 
                 name="university" 
-                placeholder="e.g., Pune University, IIT Bombay" 
+                placeholder="e.g., Pune University" 
                 value={formData.university || ''} 
                 onChange={handleChange} 
                 className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 border transition-all" 
@@ -1445,8 +1722,18 @@ export default function Profile() {
               <input type="text" name="companyName" placeholder="e.g., Google" value={formData.companyName} onChange={handleChange} className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 border transition-all" />
             </div>
             <div>
-              <label className="block text-sm font-bold text-stone-700 mb-1">Annual Income *</label>
-              <input required type="text" name="income" placeholder="e.g., 10-15 Lakhs" value={formData.income} onChange={handleChange} className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 border transition-all" />
+              <label className="block text-sm font-bold text-stone-700 mb-1">Annual Income (Optional)</label>
+              <select 
+                name="income" 
+                value={formData.income || ''} 
+                onChange={handleChange} 
+                className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 border bg-white transition-all font-medium"
+              >
+                <option value="">-- Select Annual Income (Optional) --</option>
+                {ANNUAL_INCOME_OPTIONS.map(inc => (
+                  <option key={inc} value={inc}>{inc}</option>
+                ))}
+              </select>
             </div>
           </div>
         </div>
@@ -1533,8 +1820,8 @@ export default function Profile() {
               <input type="text" name="parentsHometown" value={formData.parentsHometown} onChange={handleChange} className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 border transition-all" />
             </div>
             <div>
-              <label className="block text-sm font-bold text-stone-700 mb-1">Parents' Occupation</label>
-              <input type="text" name="parentsOccupation" value={formData.parentsOccupation} onChange={handleChange} className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 border transition-all" />
+              <label className="block text-sm font-bold text-stone-700 mb-1">Parents' Occupation / Company</label>
+              <input type="text" name="fatherOccupationCompany" placeholder="e.g. Business / Government Service" value={(formData as any).fatherOccupationCompany || formData.parentsOccupation || ''} onChange={handleChange} className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 border transition-all" />
             </div>
             <div>
               <label className="block text-sm font-bold text-stone-700 mb-1">Parents' Contact Details</label>
@@ -1752,53 +2039,57 @@ export default function Profile() {
       {isDeleteModalOpen && (
         <div className="fixed inset-0 z-[110] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border-2 border-red-200 animate-in fade-in zoom-in-95">
-            <div className="flex items-center gap-3 text-red-600 mb-4">
-              <div className="p-3 bg-red-100 rounded-full">
-                <Trash2 className="w-6 h-6" />
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-stone-100">
+              <div className="flex items-center gap-2 text-red-600 font-bold">
+                <Trash2 className="w-5 h-5" />
+                <span>Request Account Deletion</span>
               </div>
-              <h3 className="text-xl font-serif font-bold text-stone-900">Request Account Deletion</h3>
+              <button onClick={() => setIsDeleteModalOpen(false)} className="text-stone-400 hover:text-stone-600">
+                <X className="w-5 h-5" />
+              </button>
             </div>
-            
             <p className="text-sm text-stone-600 mb-4 leading-relaxed">
-              Submitting an account deletion request will notify the system Administrator. Upon approval, your profile and personal data will be permanently deleted.
+              Are you sure you want to request account deletion? Your profile will be reviewed by an admin and safely removed.
             </p>
-
-            <div className="mb-5">
-              <label className="block text-xs font-bold text-stone-700 uppercase tracking-wider mb-2">
-                Reason for Deletion (Optional)
-              </label>
-              <textarea
-                value={deletionReason}
+            <div className="mb-4">
+              <label className="block text-xs font-bold text-stone-700 uppercase mb-1">Reason for leaving (Optional)</label>
+              <textarea 
+                rows={3} 
+                value={deletionReason} 
                 onChange={(e) => setDeletionReason(e.target.value)}
-                placeholder="e.g., Found a life partner via Teli Samaj Matrimony, privacy preference..."
-                className="w-full border-stone-200 rounded-xl p-3 text-sm border focus:ring-red-500 focus:border-red-500"
-                rows={3}
+                placeholder="e.g. Found partner through Samaj / No longer needed"
+                className="w-full border-stone-200 rounded-xl text-sm p-3 focus:border-red-500 focus:ring-red-200 border"
               />
             </div>
-
-            <div className="flex justify-end gap-3">
-              <button
-                type="button"
+            <div className="flex justify-end gap-3 pt-3 border-t border-stone-100">
+              <button 
                 onClick={() => setIsDeleteModalOpen(false)}
-                className="px-5 py-2.5 rounded-xl text-stone-600 hover:bg-stone-100 text-sm font-bold transition-all"
+                className="px-4 py-2 rounded-xl text-stone-600 font-bold text-xs hover:bg-stone-100"
               >
                 Cancel
               </button>
-              <button
-                type="button"
-                disabled={requestingDeletion}
+              <button 
                 onClick={handleRequestAccountDeletion}
-                className="px-6 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-bold transition-all shadow-md active:scale-95 disabled:opacity-50 flex items-center gap-2"
+                disabled={requestingDeletion}
+                className="px-5 py-2.5 bg-red-600 text-white font-bold text-xs rounded-xl hover:bg-red-700 shadow-md active:scale-95 disabled:opacity-50"
               >
-                <Trash2 className="w-4 h-4" />
-                {requestingDeletion ? 'Submitting...' : 'Confirm Deletion Request'}
+                {requestingDeletion ? 'Submitting...' : 'Confirm Request'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      <FloatingToast message={toast} onClose={() => setToast(null)} />
+      <AddEmailModal
+        isOpen={isAddEmailModalOpen}
+        onClose={() => setIsAddEmailModalOpen(false)}
+        currentUid={user?.uid || ''}
+        userName={`${formData.firstName} ${formData.lastName}`}
+        onSuccess={(updatedEmail) => {
+          setFormData(prev => ({ ...prev, email: updatedEmail, isEmailVerified: true }));
+          setToast({ type: 'success', text: `Email address ${updatedEmail} added successfully!` });
+        }}
+      />
     </div>
   );
 }
