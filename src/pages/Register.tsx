@@ -3,11 +3,11 @@ import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { auth, googleProvider, signInWithPopup, createUserWithEmailAndPassword, RecaptchaVerifier, signInWithPhoneNumber, db, doc, setDoc, getDoc, collection, addDoc, query, where, getDocs } from '../lib/firebase';
 import { Mail, Phone, CheckCircle } from 'lucide-react';
 import FloatingToast from '../components/FloatingToast';
-import { validateAndFormatPhone } from '../lib/phoneUtils';
+import { validateAndFormatPhone, findAccountByPhone, normalizePhone } from '../lib/phoneUtils';
 import { sendAccountNotification } from '../lib/notificationUtils';
 import { triggerWelcomeEmail } from '../lib/welcomeEmail';
 import { capitalizeWords } from '../lib/capitalizationUtils';
-import { assignGlobalProfileIdInTransaction } from '../lib/profileIdUtils';
+import { assignGlobalProfileIdInTransaction, isUserAdminAccount } from '../lib/profileIdUtils';
 import logoImg from '../assets/images/LOGO.jpg';
 
 declare global {
@@ -23,7 +23,7 @@ export default function Register() {
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [loading, setLoading] = useState(false);
-  const [authMethod, setAuthMethod] = useState<'email' | 'phone'>('email');
+  const [authMethod, setAuthMethod] = useState<'phone' | 'email'>('phone');
   
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -67,9 +67,8 @@ export default function Register() {
         }
       }
       if (phoneToCheck) {
-        const qPhone = query(collection(db, 'users'), where('phoneNumber', '==', phoneToCheck.trim()));
-        const snap = await getDocs(qPhone);
-        if (!snap.empty) {
+        const existingAcc = await findAccountByPhone(phoneToCheck);
+        if (existingAcc) {
           return 'An account with this phone number already exists. Please login instead.';
         }
       }

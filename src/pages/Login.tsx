@@ -24,7 +24,7 @@ export default function Login() {
   
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [authMethod, setAuthMethod] = useState<'email' | 'phone'>('email');
+  const [authMethod, setAuthMethod] = useState<'phone' | 'email'>('phone');
   
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -92,9 +92,51 @@ export default function Login() {
     try {
       // 1. First attempt normal Firebase Auth sign in
       const res = await signInWithEmailAndPassword(auth, targetEmail, password);
+      
+      // Ensure admin role in Firestore if this is admin@admin.com
+      if (targetEmail === 'admin@admin.com') {
+        await setDoc(doc(db, 'users', res.user.uid), {
+          uid: res.user.uid,
+          email: 'admin@admin.com',
+          role: 'admin',
+          createdAt: new Date().toISOString()
+        }, { merge: true }).catch(() => {});
+        navigate('/admin');
+        return;
+      }
+      
       await checkArchivedOrAdminAndNavigate(res.user.uid, from);
     } catch (err: any) {
       console.log("Normal auth login failed:", err?.code, err?.message);
+
+      // Handle dedicated admin@admin.com provisioning if credentials match requested admin password
+      if (targetEmail === 'admin@admin.com' && password === '123456789') {
+        try {
+          const newAdminRes = await createUserWithEmailAndPassword(auth, targetEmail, password);
+          const adminUid = newAdminRes.user.uid;
+          await setDoc(doc(db, 'users', adminUid), {
+            uid: adminUid,
+            email: 'admin@admin.com',
+            role: 'admin',
+            createdAt: new Date().toISOString()
+          });
+          await setDoc(doc(db, 'profiles', adminUid), {
+            uid: adminUid,
+            email: 'admin@admin.com',
+            firstName: 'Admin',
+            lastName: 'User',
+            gender: 'Male',
+            status: 'approved',
+            role: 'admin',
+            isAdmin: true,
+            createdAt: new Date().toISOString()
+          });
+          navigate('/admin');
+          return;
+        } catch (adminErr: any) {
+          console.warn("Admin create error:", adminErr);
+        }
+      }
 
       // 2. If Auth account doesn't exist yet, check if this is a sample/seeded account or exists in Firestore
       try {

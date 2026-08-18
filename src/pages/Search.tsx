@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { db, collection, getDocs, query, where, doc, getDoc, updateDoc, onSnapshot } from '../lib/firebase';
+import { db, collection, getDocs, query, where, limit, doc, getDoc, updateDoc, onSnapshot } from '../lib/firebase';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { Search as SearchIcon, MapPin, Briefcase, GraduationCap, User, Heart, X, Users, Phone, Lock, Sparkles, Sliders, CheckCircle, AlertCircle } from 'lucide-react';
+import { Search as SearchIcon, MapPin, Briefcase, GraduationCap, User, Heart, X, Users, Phone, Lock, Sparkles, Sliders, CheckCircle, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import ImageCarousel from '../components/ImageCarousel';
 import InterestButton from '../components/InterestButton';
@@ -13,6 +13,7 @@ import { HIGHEST_EDUCATION_CATEGORIES } from '../types';
 import { calculateMatchScore, calculateProfileCompleteness, ProfileDataForMatching, MatchAnalysis, getProfileBirthYear, DEFAULT_MATCH_THRESHOLD } from '../lib/matchingUtils';
 import { translateText, formatAgeDisplay, formatHeightDisplay } from '../lib/profileTranslator';
 import { getOrAssignProfileId, getDisplayProfileId, matchesProfileId, extractSequenceNumber } from '../lib/profileIdUtils';
+import { isProfileSearchableAndVisible } from '../lib/subscriptionService';
 
 interface ProfileData {
   uid: string;
@@ -86,6 +87,8 @@ export default function Search() {
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [targetProfileForModal, setTargetProfileForModal] = useState<ProfileData | null>(null);
   const [showMatchesPointer, setShowMatchesPointer] = useState<boolean>(true);
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const pageSize = 24;
 
   useEffect(() => {
     if (location.state?.showMatchesPointer) {
@@ -97,6 +100,7 @@ export default function Search() {
     if (!user && activeTab === 'matches') {
       setActiveTab('search');
     }
+    setCurrentPage(1);
   }, [user, activeTab]);
 
   useEffect(() => {
@@ -119,27 +123,40 @@ export default function Search() {
     }
 
     setLoading(true);
-    const q = query(collection(db, 'profiles'), where('status', '==', 'approved'));
 
-    unsubProfiles = onSnapshot(q, async (querySnapshot) => {
-      // Auto-seed if database is empty or has fewer than 5 profiles
-      if (querySnapshot.empty || querySnapshot.size < 5) {
-        console.log("Seeding sample profiles because snapshot has fewer than 80 profiles...");
-        try {
-          await seedSampleProfilesToFirestore();
-        } catch (err) {
-          console.error("Auto-seeding error:", err);
-        }
-      }
+    // Target query with gender filtering and bound of 150 for 50,000+ profiles
+    let profilesQuery;
+    if (activeTab === 'matches' && myProfile?.gender) {
+      const oppGender = getOppositeGenderLabel(myProfile.gender);
+      profilesQuery = query(
+        collection(db, 'profiles'),
+        where('status', '==', 'approved'),
+        where('gender', '==', oppGender),
+        limit(150)
+      );
+    } else if (filters.gender !== 'Any') {
+      profilesQuery = query(
+        collection(db, 'profiles'),
+        where('status', '==', 'approved'),
+        where('gender', '==', filters.gender),
+        limit(150)
+      );
+    } else {
+      profilesQuery = query(
+        collection(db, 'profiles'),
+        where('status', '==', 'approved'),
+        limit(150)
+      );
+    }
 
+    unsubProfiles = onSnapshot(profilesQuery, (querySnapshot) => {
       const fetchedProfiles: ProfileData[] = [];
       querySnapshot.forEach((docSnap) => {
         const data = docSnap.data() as ProfileData;
         if ((!user || data.uid !== user.uid) && (!myProfile || data.uid !== myProfile.uid)) {
-          if (!data.isArchived && data.status !== 'archived') {
-            if ((data as any).role !== 'admin' && !(data as any).isAdmin) {
-              fetchedProfiles.push(data);
-            }
+          // Candidate profile must have an active subscription to appear in search & my matches
+          if (isProfileSearchableAndVisible(data)) {
+            fetchedProfiles.push(data);
           }
         }
       });
@@ -154,10 +171,11 @@ export default function Search() {
       if (unsubProfile) unsubProfile();
       if (unsubProfiles) unsubProfiles();
     };
-  }, [user, location.state]);
+  }, [user, filters.gender, activeTab, myProfile?.gender, location.state]);
 
   const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
+    setCurrentPage(1);
     setFilters(prev => ({
       ...prev,
       [name]: value
@@ -199,8 +217,8 @@ export default function Search() {
     if (!myProfile || !myProfile.partnerPreferences) return false;
     const prefs = myProfile.partnerPreferences;
     const hasBirthYear = Boolean(prefs.preferredBirthYear && Number(prefs.preferredBirthYear) > 1950);
-    const hasEdu = Boolean(prefs.education && (Array.isArray(prefs.education) ? prefs.education.length > 0 : String(prefs.education).trim() !== '' && String(prefs.education).toLowerCase() !== 'any'));
-    const hasLoc = Boolean(prefs.location && (Array.isArray(prefs.location) ? prefs.location.length > 0 : String(prefs.location).trim() !== '' && String(prefs.location).toLowerCase() !== 'any'));
+    const hasEdu = Boolean(prefs.education && (Array.isArray(prefs.education) ? prefs.education.length > 0 : String(prefs.education).trim() !== ''));
+    const hasLoc = Boolean(prefs.location && (Array.isArray(prefs.location) ? prefs.location.length > 0 : String(prefs.location).trim() !== ''));
     const hasMarital = Boolean(prefs.maritalStatus && String(prefs.maritalStatus).trim() !== '');
     const hasProf = Boolean(prefs.profession && String(prefs.profession).trim() !== '');
     return hasBirthYear || hasEdu || hasLoc || hasMarital || hasProf;
@@ -462,7 +480,9 @@ export default function Search() {
             <h1 className="text-4xl font-serif font-bold mb-2 text-stone-900">
               {activeTab === 'matches' ? t('search.matchesTitle') : t('search.title')}
             </h1>
-            <p className="text-stone-500 font-medium">Showing {displayProfiles.length} profiles</p>
+            <p className="text-stone-500 font-medium">
+              Showing {Math.min(displayProfiles.length, (currentPage - 1) * pageSize + 1)} - {Math.min(displayProfiles.length, currentPage * pageSize)} of {displayProfiles.length} profiles
+            </p>
           </div>
           
           <div className="flex bg-stone-100 p-1.5 rounded-2xl w-fit relative">
@@ -615,135 +635,168 @@ export default function Search() {
             )}
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {displayProfiles.map(profile => {
-              const matchAnalysis = matchAnalysisMap.get(profile.uid);
-              const matchPercentage = matchAnalysis?.matchPercentage || 0;
-              const pId = getDisplayProfileId(profile);
+          <div className="space-y-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+              {displayProfiles.slice((currentPage - 1) * pageSize, currentPage * pageSize).map(profile => {
+                const matchAnalysis = matchAnalysisMap.get(profile.uid);
+                const matchPercentage = matchAnalysis?.matchPercentage || 0;
+                const pId = getDisplayProfileId(profile);
 
-              return (
-                <div key={profile.uid} className="bg-white rounded-3xl overflow-hidden shadow-lg border border-stone-100 hover:shadow-xl transition-all group relative">
-                  <div 
-                    onClick={() => !user && handleViewProfile(profile)}
-                    className={`aspect-[4/5] bg-stone-100 relative overflow-hidden ${!user ? 'cursor-pointer' : ''}`}
-                  >
-                    {/* Profile ID badge top-left (when activeTab is manual search) or next to match */}
-                    <div className="absolute top-4 left-4 z-10 flex flex-col gap-1.5 items-start">
-                      <span className="px-3 py-1 rounded-full text-xs font-mono font-extrabold bg-stone-900/90 text-amber-300 shadow-md backdrop-blur-md border border-amber-400/30 tracking-wider">
-                        {pId}
-                      </span>
-                      {activeTab === 'matches' && (
-                        <span className={`px-3 py-1 rounded-full text-xs font-bold text-white shadow-lg backdrop-blur-md flex items-center gap-1 ${
-                          matchPercentage >= 80 ? 'bg-emerald-600/90 border border-emerald-400/30' : matchPercentage >= 50 ? 'bg-amber-600/90 border border-amber-400/30' : 'bg-stone-700/90 border border-stone-500/30'
-                        }`}>
-                          <Sparkles className="w-3 h-3 text-amber-300" />
-                          {matchPercentage}% Match
+                return (
+                  <div key={profile.uid} className="bg-white rounded-3xl overflow-hidden shadow-lg border border-stone-100 hover:shadow-xl transition-all group relative">
+                    <div 
+                      onClick={() => !user && handleViewProfile(profile)}
+                      className={`aspect-[4/5] bg-stone-100 relative overflow-hidden ${!user ? 'cursor-pointer' : ''}`}
+                    >
+                      {/* Profile ID badge top-left (when activeTab is manual search) or next to match */}
+                      <div className="absolute top-4 left-4 z-10 flex flex-col gap-1.5 items-start">
+                        <span className="px-3 py-1 rounded-full text-xs font-mono font-extrabold bg-stone-900/90 text-amber-300 shadow-md backdrop-blur-md border border-amber-400/30 tracking-wider">
+                          {pId}
                         </span>
-                      )}
-                    </div>
-
-                    {user && myProfile && profile.uid !== user.uid && profile.uid !== myProfile.uid && (
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); toggleFavorite(profile.uid); }}
-                        className="absolute top-4 right-4 z-10 p-2.5 rounded-full bg-white/90 backdrop-blur-md hover:bg-white transition-all shadow-md group-hover:scale-110"
-                      >
-                        <Heart className={`h-5 w-5 ${myProfile.favorites?.includes(profile.uid) ? 'fill-saffron text-saffron' : 'text-stone-400'}`} />
-                      </button>
-                    )}
-                    {profile.photoUrl ? (
-                      <img 
-                        src={profile.photoUrl} 
-                        alt={profile.firstName} 
-                        className={`w-full h-full object-cover transition-transform duration-500 ${!user ? 'blur-md scale-105' : 'group-hover:scale-105'}`} 
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center bg-stone-100 text-stone-300">
-                        <User className="h-20 w-20" />
-                      </div>
-                    )}
-
-                    {/* Locked Overlay for Non-Logged-In Users */}
-                    {!user && (
-                      <div className="absolute inset-0 bg-black/40 backdrop-blur-[3px] flex flex-col items-center justify-center p-4 text-center z-10">
-                        <div className="bg-saffron text-white p-3 rounded-full mb-2 shadow-xl animate-pulse">
-                          <Lock className="h-6 w-6" />
-                        </div>
-                        <span className="text-white font-bold text-sm tracking-wide drop-shadow">Photo Locked</span>
-                        <span className="text-xs text-white/90 font-medium bg-black/50 px-3 py-1 rounded-full border border-white/20 mt-1.5 shadow">
-                          Click to Unlock
-                        </span>
-                      </div>
-                    )}
-
-                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-5 z-20">
-                      <h3 className="text-white font-serif font-bold text-xl drop-shadow">
-                        {profile.firstName} {profile.lastName}
-                      </h3>
-                      <p className="text-gold text-sm font-semibold">{formatAgeDisplay(profile.age, i18n.language)} • {formatHeightDisplay(profile.height, i18n.language)}</p>
-                    </div>
-                  </div>
-
-                  <div className="p-5 space-y-4">
-                    <div className="space-y-2.5">
-                      <div className="flex items-start gap-3 text-sm text-stone-600">
-                        <GraduationCap className="h-4 w-4 mt-0.5 flex-shrink-0 text-saffron" />
-                        {user ? (
-                          <span className="line-clamp-1 font-medium">{translateText(profile.highestEducation || profile.education, i18n.language)}</span>
-                        ) : (
-                          <span className="text-stone-400 font-mono text-xs flex items-center gap-1">
-                            <Lock className="w-3 h-3 text-saffron" /> Education Locked (Login to view)
+                        {activeTab === 'matches' && (
+                          <span className={`px-3 py-1 rounded-full text-xs font-bold text-white shadow-lg backdrop-blur-md flex items-center gap-1 ${
+                            matchPercentage >= 80 ? 'bg-emerald-600/90 border border-emerald-400/30' : matchPercentage >= 50 ? 'bg-amber-600/90 border border-amber-400/30' : 'bg-stone-700/90 border border-stone-500/30'
+                          }`}>
+                            <Sparkles className="w-3 h-3 text-amber-300" />
+                            {matchPercentage}% Match
                           </span>
                         )}
                       </div>
-                      <div className="flex items-start gap-3 text-sm text-stone-600">
-                        <Briefcase className="h-4 w-4 mt-0.5 flex-shrink-0 text-saffron" />
-                        {user ? (
-                          <span className="line-clamp-1 font-medium">{translateText(profile.profession, i18n.language)}</span>
-                        ) : (
-                          <span className="text-stone-400 font-mono text-xs flex items-center gap-1">
-                            <Lock className="w-3 h-3 text-saffron" /> Profession Locked (Login to view)
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-start gap-3 text-sm text-stone-600">
-                        <MapPin className="h-4 w-4 mt-0.5 flex-shrink-0 text-saffron" />
-                        {user ? (
-                          <span className="line-clamp-1 font-medium">{translateText(profile.location || profile.nativePlace, i18n.language)}</span>
-                        ) : (
-                          <span className="text-stone-400 font-mono text-xs flex items-center gap-1">
-                            <Lock className="w-3 h-3 text-saffron" /> Location Locked (Login to view)
-                          </span>
-                        )}
-                      </div>
-                    </div>
 
-                    {/* No compatibility breakdown box displayed per user instruction */}
-
-                    <div className="pt-2 flex flex-col gap-2">
-                      {user ? (
-                        <>
-                          <InterestButton targetProfile={profile} variant="primary" />
-                          <button 
-                            onClick={() => handleViewProfile(profile)}
-                            className="w-full bg-stone-900 text-white py-3 rounded-xl font-bold hover:bg-saffron transition-all shadow-md active:scale-[0.98] text-sm"
-                          >
-                            View Full Profile
-                          </button>
-                        </>
-                      ) : (
+                      {user && myProfile && profile.uid !== user.uid && profile.uid !== myProfile.uid && (
                         <button 
-                          onClick={() => handleViewProfile(profile)}
-                          className="w-full bg-saffron text-white py-3 rounded-xl font-bold hover:bg-orange-600 transition-all shadow-md active:scale-[0.98] text-sm flex items-center justify-center gap-2"
+                          onClick={(e) => { e.stopPropagation(); toggleFavorite(profile.uid); }}
+                          className="absolute top-4 right-4 z-10 p-2.5 rounded-full bg-white/90 backdrop-blur-md hover:bg-white transition-all shadow-md group-hover:scale-110"
                         >
-                          <Lock className="w-4 h-4" />
-                          Show Profile (Login Required)
+                          <Heart className={`h-5 w-5 ${myProfile.favorites?.includes(profile.uid) ? 'fill-saffron text-saffron' : 'text-stone-400'}`} />
                         </button>
                       )}
+                      {profile.photoUrl ? (
+                        <img 
+                          src={profile.photoUrl} 
+                          alt={profile.firstName} 
+                          className={`w-full h-full object-cover transition-transform duration-500 ${!user ? 'blur-md scale-105' : 'group-hover:scale-105'}`} 
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center bg-stone-100 text-stone-300">
+                          <User className="h-20 w-20" />
+                        </div>
+                      )}
+
+                      {/* Locked Overlay for Non-Logged-In Users */}
+                      {!user && (
+                        <div className="absolute inset-0 bg-black/40 backdrop-blur-[3px] flex flex-col items-center justify-center p-4 text-center z-10">
+                          <div className="bg-saffron text-white p-3 rounded-full mb-2 shadow-xl animate-pulse">
+                            <Lock className="h-6 w-6" />
+                          </div>
+                          <span className="text-white font-bold text-sm tracking-wide drop-shadow">Photo Locked</span>
+                          <span className="text-xs text-white/90 font-medium bg-black/50 px-3 py-1 rounded-full border border-white/20 mt-1.5 shadow">
+                            Click to Unlock
+                          </span>
+                        </div>
+                      )}
+
+                      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-5 z-20">
+                        <h3 className="text-white font-serif font-bold text-xl drop-shadow">
+                          {profile.firstName} {profile.lastName}
+                        </h3>
+                        <p className="text-gold text-sm font-semibold">{formatAgeDisplay(profile.age, i18n.language)} • {formatHeightDisplay(profile.height, i18n.language)}</p>
+                      </div>
+                    </div>
+
+                    <div className="p-5 space-y-4">
+                      <div className="space-y-2.5">
+                        <div className="flex items-start gap-3 text-sm text-stone-600">
+                          <GraduationCap className="h-4 w-4 mt-0.5 flex-shrink-0 text-saffron" />
+                          {user ? (
+                            <span className="line-clamp-1 font-medium">{translateText(profile.highestEducation || profile.education, i18n.language)}</span>
+                          ) : (
+                            <span className="text-stone-400 font-mono text-xs flex items-center gap-1">
+                              <Lock className="w-3 h-3 text-saffron" /> Education Locked (Login to view)
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-start gap-3 text-sm text-stone-600">
+                          <Briefcase className="h-4 w-4 mt-0.5 flex-shrink-0 text-saffron" />
+                          {user ? (
+                            <span className="line-clamp-1 font-medium">{translateText(profile.profession, i18n.language)}</span>
+                          ) : (
+                            <span className="text-stone-400 font-mono text-xs flex items-center gap-1">
+                              <Lock className="w-3 h-3 text-saffron" /> Profession Locked (Login to view)
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-start gap-3 text-sm text-stone-600">
+                          <MapPin className="h-4 w-4 mt-0.5 flex-shrink-0 text-saffron" />
+                          {user ? (
+                            <span className="line-clamp-1 font-medium">{translateText(profile.location || profile.nativePlace, i18n.language)}</span>
+                          ) : (
+                            <span className="text-stone-400 font-mono text-xs flex items-center gap-1">
+                              <Lock className="w-3 h-3 text-saffron" /> Location Locked (Login to view)
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="pt-2 flex flex-col gap-2">
+                        {user ? (
+                          <>
+                            <InterestButton targetProfile={profile} variant="primary" />
+                            <button 
+                              onClick={() => handleViewProfile(profile)}
+                              className="w-full bg-stone-900 text-white py-3 rounded-xl font-bold hover:bg-saffron transition-all shadow-md active:scale-[0.98] text-sm"
+                            >
+                              View Full Profile
+                            </button>
+                          </>
+                        ) : (
+                          <button 
+                            onClick={() => handleViewProfile(profile)}
+                            className="w-full bg-saffron text-white py-3 rounded-xl font-bold hover:bg-orange-600 transition-all shadow-md active:scale-[0.98] text-sm flex items-center justify-center gap-2"
+                          >
+                            <Lock className="w-4 h-4" />
+                            Show Profile (Login Required)
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
+                );
+              })}
+            </div>
+
+            {/* Pagination Controls */}
+            {Math.ceil(displayProfiles.length / pageSize) > 1 && (
+              <div className="flex items-center justify-between border-t border-stone-200 pt-6 mt-8">
+                <button
+                  onClick={() => {
+                    setCurrentPage(p => Math.max(1, p - 1));
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  disabled={currentPage === 1}
+                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-stone-300 text-sm font-semibold text-stone-700 hover:bg-stone-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-xs"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  <span>Previous</span>
+                </button>
+
+                <div className="text-sm font-semibold text-stone-600">
+                  Page <span className="text-saffron font-bold">{currentPage}</span> of <span className="font-bold text-stone-900">{Math.ceil(displayProfiles.length / pageSize)}</span>
                 </div>
-              );
-            })}
+
+                <button
+                  onClick={() => {
+                    setCurrentPage(p => Math.min(Math.ceil(displayProfiles.length / pageSize), p + 1));
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  disabled={currentPage >= Math.ceil(displayProfiles.length / pageSize)}
+                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-stone-300 text-sm font-semibold text-stone-700 hover:bg-stone-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-xs"
+                >
+                  <span>Next</span>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

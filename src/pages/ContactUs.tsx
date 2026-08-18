@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Mail, Phone, MapPin, Send, CheckCircle2, MessageSquare, Clock, Globe, Share2, Facebook, Instagram, Youtube, Linkedin, Twitter, ExternalLink, Star } from 'lucide-react';
 import { db, collection, addDoc } from '../lib/firebase';
-import { subscribeContactSettings, DEFAULT_CONTACT_SETTINGS, ContactUsSettings } from '../lib/contactSettings';
+import { subscribeContactSettings, DEFAULT_CONTACT_SETTINGS, ContactUsSettings, getActiveSocialPlatforms } from '../lib/contactSettings';
 import { validateAndFormatPhone, validateEmail } from '../lib/phoneUtils';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -207,13 +207,19 @@ export default function ContactUs() {
     }
   };
 
-  const socialPlatforms = [
-    { name: 'Facebook', url: contactInfo.facebookUrl, icon: Facebook, color: 'text-blue-600' },
-    { name: 'Instagram', url: contactInfo.instagramUrl, icon: Instagram, color: 'text-pink-600' },
-    { name: 'YouTube', url: contactInfo.youtubeUrl, icon: Youtube, color: 'text-red-600' },
-    { name: 'LinkedIn', url: contactInfo.linkedinUrl, icon: Linkedin, color: 'text-blue-700' },
-    { name: 'Twitter / X', url: contactInfo.twitterUrl, icon: Twitter, color: 'text-sky-500' },
-  ];
+  const platformIconMap = {
+    facebook: { icon: Facebook, color: 'text-blue-600' },
+    instagram: { icon: Instagram, color: 'text-pink-600' },
+    youtube: { icon: Youtube, color: 'text-red-600' },
+    linkedin: { icon: Linkedin, color: 'text-blue-700' },
+    twitter: { icon: Twitter, color: 'text-sky-500' },
+  };
+
+  const activeSocials = getActiveSocialPlatforms(contactInfo).map(p => ({
+    ...p,
+    icon: platformIconMap[p.platformKey].icon,
+    color: platformIconMap[p.platformKey].color
+  }));
 
   const fullAddress = [
     contactInfo.officeName,
@@ -331,16 +337,16 @@ export default function ContactUs() {
             </div>
 
             {/* Social Media Channels */}
-            <div className="pt-6 border-t border-stone-100 space-y-3">
-              <span className="text-xs font-bold text-stone-400 uppercase tracking-wider block">Social Channels</span>
-              <div className="grid grid-cols-1 gap-2 text-xs font-semibold text-stone-600">
-                {socialPlatforms.map((platform) => (
-                  <div key={platform.name} className="flex justify-between items-center bg-stone-50 p-2.5 rounded-xl border border-stone-200/60">
-                    <div className="flex items-center gap-2">
-                      <platform.icon className={`w-4 h-4 ${platform.color}`} />
-                      <span>{platform.name}</span>
-                    </div>
-                    {platform.url ? (
+            {activeSocials.length > 0 && (
+              <div className="pt-6 border-t border-stone-100 space-y-3">
+                <span className="text-xs font-bold text-stone-400 uppercase tracking-wider block">Social Channels</span>
+                <div className="grid grid-cols-1 gap-2 text-xs font-semibold text-stone-600">
+                  {activeSocials.map((platform) => (
+                    <div key={platform.name} className="flex justify-between items-center bg-stone-50 p-2.5 rounded-xl border border-stone-200/60">
+                      <div className="flex items-center gap-2">
+                        <platform.icon className={`w-4 h-4 ${platform.color}`} />
+                        <span>{platform.name}</span>
+                      </div>
                       <a 
                         href={platform.url} 
                         target="_blank" 
@@ -350,13 +356,11 @@ export default function ContactUs() {
                         <span>Visit</span>
                         <ExternalLink className="w-3 h-3" />
                       </a>
-                    ) : (
-                      <span className="text-stone-400 italic font-normal">Not Configured</span>
-                    )}
-                  </div>
-                ))}
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* Form Card with Tabs */}
@@ -427,7 +431,7 @@ export default function ContactUs() {
                         <input
                           type="text"
                           required
-                          placeholder="e.g. Akash Pawar"
+                          placeholder="e.g. Ramesh Patil"
                           value={name}
                           onChange={(e) => setName(e.target.value)}
                           className="w-full px-4 py-3 rounded-xl border border-stone-300 focus:border-saffron focus:ring-2 focus:ring-saffron/20 text-sm"
@@ -547,7 +551,7 @@ export default function ContactUs() {
                         <input
                           type="text"
                           required
-                          placeholder="e.g. Akash Pawar"
+                          placeholder="e.g. Rahul Shinde"
                           value={reviewName}
                           onChange={(e) => setReviewName(e.target.value)}
                           className="w-full px-4 py-3 rounded-xl border border-stone-300 focus:border-saffron focus:ring-2 focus:ring-saffron/20 text-sm"

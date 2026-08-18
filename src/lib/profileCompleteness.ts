@@ -43,7 +43,7 @@ export function checkProfileCompleteness(profileData: any): ProfileCompletenessR
     // Validation checks
     if (val === undefined || val === null || String(val).trim() === '') {
       missingFields.push({ key: field.key, label: field.label });
-    } else if (field.key === 'contactNumber') {
+    } else if (field.key === 'contactNumber' || field.key === 'parentsContact') {
       const digits = String(val).replace(/[^\d]/g, '');
       if (digits.length < 10) {
         missingFields.push({ key: field.key, label: field.label });

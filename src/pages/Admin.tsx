@@ -14,6 +14,10 @@ import { ContactUsSettings, getContactSettings, saveContactSettings, DEFAULT_CON
 import { MapPin, PhoneCall, Globe, Share2, Facebook, Instagram, Youtube, Linkedin, Twitter, Save } from 'lucide-react';
 import { calculateMatchScore, generateNoMatchReason, calculateProfileCompleteness } from '../lib/matchingUtils';
 import logoImg from '../assets/images/LOGO.jpg';
+import { isSubscriptionActive, isProfileActiveMember, activateSubscriptionInFirestore, deactivateSubscriptionInFirestore, getSubscriptionDetails, ANNUAL_SUBSCRIPTION_PRICE, SubscriptionData } from '../lib/subscriptionService';
+import { Sparkles, CreditCard, Newspaper, Plus, Calendar, Edit3 } from 'lucide-react';
+import AdminCommunityNewsModal from '../components/AdminCommunityNewsModal';
+import { subscribeAllCommunityNews, NewsItem, deleteCommunityNewsItem, saveCommunityNewsItem, seedInitialCommunityNews } from '../data/communityNewsData';
 
 interface ProfileData {
   uid: string;
@@ -68,8 +72,14 @@ export default function Admin() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [seeding, setSeeding] = useState(false);
-  const [activeTab, setActiveTab] = useState<'overview' | 'pending' | 'members' | 'zeroMatches' | 'adminNotifications' | 'admins' | 'sampleAccounts' | 'deletionRequests' | 'archived' | 'reviews' | 'contactSettings'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'pending' | 'members' | 'subscriptions' | 'zeroMatches' | 'adminNotifications' | 'admins' | 'sampleAccounts' | 'deletionRequests' | 'archived' | 'reviews' | 'contactSettings' | 'news'>('overview');
+  const [subscriptionFilter, setSubscriptionFilter] = useState<'all' | 'active' | 'inactive' | 'expired' | 'pending'>('all');
   const [notificationFilter, setNotificationFilter] = useState<'all' | 'queries' | 'feedback' | 'newProfiles' | 'moderation'>('all');
+
+  // Community News State
+  const [newsList, setNewsList] = useState<NewsItem[]>([]);
+  const [editingNewsItem, setEditingNewsItem] = useState<Partial<NewsItem> | null>(null);
+  const [newsModalOpen, setNewsModalOpen] = useState(false);
 
   // Reviews & Feedback State
   const [reviewsList, setReviewsList] = useState<any[]>([]);
@@ -118,17 +128,8 @@ export default function Admin() {
 
     setLoading(true);
 
-    // Real-time listener for profiles
-    const unsubProfiles = onSnapshot(collection(db, 'profiles'), async (profilesSnap) => {
-      if (profilesSnap.size < 5) {
-        console.log("Admin auto-seeding sample profiles...");
-        try {
-          await seedSampleProfilesToFirestore();
-        } catch (e) {
-          console.error("Error auto-seeding sample profiles:", e);
-        }
-      }
-
+    // Real-time listener for profiles directly from Firestore
+    const unsubProfiles = onSnapshot(collection(db, 'profiles'), (profilesSnap) => {
       const fetchedProfiles: ProfileData[] = [];
       profilesSnap.forEach((docSnap) => {
         fetchedProfiles.push(docSnap.data() as ProfileData);
@@ -206,6 +207,11 @@ export default function Admin() {
       console.warn("Error in reviews snapshot:", err);
     });
 
+    // Real-time listener for community news
+    const unsubNews = subscribeAllCommunityNews((items) => {
+      setNewsList(items);
+    });
+
     return () => {
       unsubProfiles();
       unsubAdmins();
@@ -214,6 +220,7 @@ export default function Admin() {
       unsubNotifs();
       unsubContactSettings();
       unsubReviews();
+      unsubNews();
     };
   }, [profile, authLoading, navigate]);
 
@@ -308,14 +315,22 @@ export default function Admin() {
         status: newStatus,
         updatedAt: new Date().toISOString()
       });
-      setProfiles(profiles.map(p => p.uid === uid ? { ...p, status: newStatus } : p));
+
+      try {
+        await updateDoc(doc(db, 'users', uid), {
+          status: newStatus,
+          updatedAt: new Date().toISOString()
+        });
+      } catch (_) {}
+
+      setProfiles(prev => prev.map(p => p.uid === uid ? { ...p, status: newStatus } : p));
       setToast({ 
         type: 'success', 
-        text: newStatus === 'approved' ? 'Profile approved successfully!' : 'Profile status set to ' + newStatus 
+        text: newStatus === 'approved' ? 'Profile approved successfully in database!' : 'Profile status set to ' + newStatus 
       });
     } catch (error) {
-      console.error("Error updating status:", error);
-      setToast({ type: 'error', text: 'Failed to update profile status.' });
+      console.error("Error updating status in Firestore:", error);
+      setToast({ type: 'error', text: 'Failed to update profile status in database.' });
     } finally {
       setActionLoading(null);
     }
@@ -548,10 +563,12 @@ export default function Admin() {
     try {
       await updateDoc(doc(db, 'reviews', reviewId), {
         showOnHome: !currentVal,
+        isFeatured: !currentVal,
+        featured: !currentVal,
         status: !currentVal ? 'approved' : 'pending',
         updatedAt: new Date().toISOString()
       });
-      setToast({ type: 'success', text: !currentVal ? 'Review enabled for Home Page!' : 'Review removed from Home Page.' });
+      setToast({ type: 'success', text: !currentVal ? 'Review marked as Featured for Community Feedback!' : 'Review removed from Featured.' });
     } catch (err) {
       console.error(err);
       setToast({ type: 'error', text: 'Failed to update review.' });
@@ -572,19 +589,66 @@ export default function Admin() {
   };
 
   const handleDeleteReview = async (reviewId: string) => {
-    if (!window.confirm('Are you sure you want to permanently delete this review?')) return;
+    setActionLoading(reviewId);
     try {
       await deleteDoc(doc(db, 'reviews', reviewId));
-      setToast({ type: 'success', text: 'Review permanently deleted.' });
+      try {
+        await deleteDoc(doc(db, 'contactQueries', reviewId));
+      } catch (_) {}
+      setReviewsList(prev => prev.filter(r => r.id !== reviewId));
+      setToast({ type: 'success', text: 'Review permanently deleted from database.' });
     } catch (err) {
-      console.error(err);
-      setToast({ type: 'error', text: 'Failed to delete review.' });
+      console.error("Error deleting review:", err);
+      setToast({ type: 'error', text: 'Failed to delete review from database.' });
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleDeleteNews = async (id: string) => {
+    if (!window.confirm('Are you sure you want to delete this community news article?')) return;
+    setActionLoading(id);
+    try {
+      await deleteCommunityNewsItem(id);
+      setToast({ type: 'success', text: 'Community news article deleted.' });
+    } catch (err) {
+      console.error("Error deleting news:", err);
+      setToast({ type: 'error', text: 'Failed to delete news article.' });
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleToggleNewsPublish = async (item: NewsItem) => {
+    setActionLoading(item.id);
+    try {
+      await saveCommunityNewsItem({ ...item, published: !item.published });
+      setToast({
+        type: 'success',
+        text: !item.published ? 'Article published to website homepage.' : 'Article set to draft mode.'
+      });
+    } catch (err) {
+      console.error("Error toggling news publication:", err);
+      setToast({ type: 'error', text: 'Failed to update article status.' });
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleSeedNews = async () => {
+    setActionLoading('seed_news');
+    try {
+      await seedInitialCommunityNews();
+      setToast({ type: 'success', text: 'Default community news articles initialized in Firestore.' });
+    } catch (err) {
+      console.error("Error seeding news:", err);
+      setToast({ type: 'error', text: 'Failed to seed community news.' });
+    } finally {
+      setActionLoading(null);
     }
   };
 
   const handleSeedData = async () => {
-    if (!window.confirm("This will seed 20 complete sample profiles (10 Male & 10 Female) into the database. Continue?")) return;
-    
     setSeeding(true);
     try {
       const res = await seedSampleProfilesToFirestore();
@@ -604,28 +668,33 @@ export default function Admin() {
   const featuredProfiles = profiles.filter(p => p.isFeatured && (p as any).role !== 'admin' && !(p as any).isAdmin);
 
   // Calculate Approved Users with Zero Matches & Diagnostic Reasons
-  const zeroMatchProfiles = approvedProfiles.map(p => {
-    const candidatePool = approvedProfiles.filter(cand => cand.uid !== p.uid);
-    let matchCount = 0;
-    for (const cand of candidatePool) {
-      const scoreAnalysis = calculateMatchScore(p as any, cand as any);
-      if (scoreAnalysis.isEligible && scoreAnalysis.matchPercentage >= 40) {
-        matchCount++;
+  // Guarded with useMemo to scale smoothly with large datasets
+  const zeroMatchProfiles = React.useMemo(() => {
+    if (activeTab !== 'zeroMatches' && activeTab !== 'overview') return [];
+    const pool = approvedProfiles.slice(0, 300);
+    return pool.map(p => {
+      const candidatePool = pool.filter(cand => cand.uid !== p.uid);
+      let matchCount = 0;
+      for (const cand of candidatePool) {
+        const scoreAnalysis = calculateMatchScore(p as any, cand as any);
+        if (scoreAnalysis.isEligible && scoreAnalysis.matchPercentage >= 40) {
+          matchCount++;
+        }
       }
-    }
-    const completeness = calculateProfileCompleteness(p as any);
-    const diag = generateNoMatchReason(p as any, candidatePool as any);
-    const profileId = getDisplayProfileId(p);
+      const completeness = calculateProfileCompleteness(p as any);
+      const diag = generateNoMatchReason(p as any, candidatePool as any);
+      const profileId = getDisplayProfileId(p);
 
-    return {
-      profile: p,
-      profileId,
-      completeness,
-      matchCount,
-      category: diag.category,
-      reasonDetail: diag.detail
-    };
-  }).filter(item => item.matchCount === 0);
+      return {
+        profile: p,
+        profileId,
+        completeness,
+        matchCount,
+        category: diag.category,
+        reasonDetail: diag.detail
+      };
+    }).filter(item => item.matchCount === 0);
+  }, [approvedProfiles, activeTab]);
 
   const newQueriesCount = contactQueries.filter(q => q.status === 'new' || !q.status).length;
   const unreadNotifsCount = adminNotifications.filter(n => !n.read).length;
@@ -717,209 +786,63 @@ export default function Admin() {
             <RefreshCw className="h-4 w-4" />
             Refresh
           </button>
-          <button 
-            onClick={handleSeedData}
-            disabled={seeding}
-            className="flex items-center gap-2 bg-saffron text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-orange-600 transition-all shadow-md disabled:opacity-50"
-          >
-            <Database className="h-4 w-4" />
-            {seeding ? 'Seeding...' : t('admin.seedDataBtn', 'Seed Sample Profiles')}
-          </button>
         </div>
       </div>
 
-      {/* Navigation Tabs */}
-<div className="border-b border-stone-200 mb-8">
-  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-4 text-sm font-bold">
-    
-    {/* Overview */}
-    <button
-      onClick={() => setActiveTab('overview')}
-      className={`flex items-center justify-center gap-2 py-3 px-3 border-b-2 transition-all whitespace-nowrap ${
-        activeTab === 'overview'
-          ? 'border-saffron text-saffron'
-          : 'border-transparent text-stone-500 hover:text-stone-900'
-      }`}
-    >
-      <BarChart2 className="w-4 h-4 shrink-0" />
-      <span>{t('admin.systemStats', 'System Overview')}</span>
-    </button>
-
-    {/* Pending Approvals */}
-    <button
-      onClick={() => setActiveTab('pending')}
-      className={`flex items-center justify-center gap-2 py-3 px-3 border-b-2 transition-all whitespace-nowrap relative ${
-        activeTab === 'pending'
-          ? 'border-saffron text-saffron'
-          : 'border-transparent text-stone-500 hover:text-stone-900'
-      }`}
-    >
-      <Clock className="w-4 h-4 shrink-0" />
-      <span>{t('admin.pendingApprovals', 'Pending Approvals')}</span>
-
-      {pendingProfiles.length > 0 && (
-        <span className="bg-saffron text-white text-[11px] font-black px-2 py-0.5 rounded-full">
-          {pendingProfiles.length}
-        </span>
-      )}
-    </button>
-
-    {/* All Members */}
-    <button
-      onClick={() => setActiveTab('members')}
-      className={`flex items-center justify-center gap-2 py-3 px-3 border-b-2 transition-all whitespace-nowrap ${
-        activeTab === 'members'
-          ? 'border-saffron text-saffron'
-          : 'border-transparent text-stone-500 hover:text-stone-900'
-      }`}
-    >
-      <User className="w-4 h-4 shrink-0" />
-      <span>
-        {t('admin.allProfiles', 'All Member Profiles')} ({profiles.length})
-      </span>
-    </button>
-
-    {/* Zero Matches */}
-    <button
-      onClick={() => setActiveTab('zeroMatches')}
-      className={`flex items-center justify-center gap-2 py-3 px-3 border-b-2 transition-all whitespace-nowrap relative ${
-        activeTab === 'zeroMatches'
-          ? 'border-saffron text-saffron font-bold'
-          : 'border-transparent text-stone-500 hover:text-stone-900'
-      }`}
-    >
-      <UserX className="w-4 h-4 text-orange-600 shrink-0" />
-      <span>Users with 0 Matches</span>
-
-      {zeroMatchProfiles.length > 0 && (
-        <span className="bg-orange-600 text-white text-[11px] font-black px-2 py-0.5 rounded-full">
-          {zeroMatchProfiles.length}
-        </span>
-      )}
-    </button>
-
-    {/* Notifications */}
-    <button
-      onClick={() => setActiveTab('adminNotifications')}
-      className={`flex items-center justify-center gap-2 py-3 px-3 border-b-2 transition-all whitespace-nowrap relative ${
-        activeTab === 'adminNotifications'
-          ? 'border-saffron text-saffron font-bold'
-          : 'border-transparent text-stone-500 hover:text-stone-900'
-      }`}
-    >
-      <Bell className="w-4 h-4 text-saffron shrink-0" />
-      <span>Admin Notifications & Queries</span>
-
-      {(newQueriesCount + unreadNotifsCount) > 0 && (
-        <span className="bg-saffron text-white text-[11px] font-black px-2 py-0.5 rounded-full">
-          {newQueriesCount + unreadNotifsCount}
-        </span>
-      )}
-    </button>
-
-    {/* Admin Users */}
-    <button
-      onClick={() => setActiveTab('admins')}
-      className={`flex items-center justify-center gap-2 py-3 px-3 border-b-2 transition-all whitespace-nowrap ${
-        activeTab === 'admins'
-          ? 'border-saffron text-saffron'
-          : 'border-transparent text-stone-500 hover:text-stone-900'
-      }`}
-    >
-      <UserPlus className="w-4 h-4 shrink-0" />
-      <span>{t('admin.adminUsers', 'Admin Users')} ({adminUsers.length})</span>
-    </button>
-
-    {/* Sample Accounts */}
-    <button
-      onClick={() => setActiveTab('sampleAccounts')}
-      className={`flex items-center justify-center gap-2 py-3 px-3 border-b-2 transition-all whitespace-nowrap ${
-        activeTab === 'sampleAccounts'
-          ? 'border-saffron text-saffron font-bold'
-          : 'border-transparent text-stone-500 hover:text-stone-900'
-      }`}
-    >
-      <Database className="w-4 h-4 shrink-0" />
-      <span>100 Test Accounts Credentials</span>
-    </button>
-
-    {/* Deletion Requests */}
-    <button
-      onClick={() => setActiveTab('deletionRequests')}
-      className={`flex items-center justify-center gap-2 py-3 px-3 border-b-2 transition-all whitespace-nowrap relative ${
-        activeTab === 'deletionRequests'
-          ? 'border-saffron text-saffron font-bold'
-          : 'border-transparent text-stone-500 hover:text-stone-900'
-      }`}
-    >
-      <Trash2 className="w-4 h-4 text-red-500 shrink-0" />
-      <span>Deletion Requests</span>
-
-      {deletionProfiles.length > 0 && (
-        <span className="bg-red-600 text-white text-[11px] font-black px-2 py-0.5 rounded-full">
-          {deletionProfiles.length}
-        </span>
-      )}
-    </button>
-
-    {/* Archived */}
-    <button
-      onClick={() => setActiveTab('archived')}
-      className={`flex items-center justify-center gap-2 py-3 px-3 border-b-2 transition-all whitespace-nowrap relative ${
-        activeTab === 'archived'
-          ? 'border-saffron text-saffron font-bold'
-          : 'border-transparent text-stone-500 hover:text-stone-900'
-      }`}
-    >
-      <Clock className="w-4 h-4 text-amber-600 shrink-0" />
-      <span>Archived Profiles (30-Days)</span>
-
-      {profiles.filter(
-        p => p.status === 'archived' || (p as any).isArchived
-      ).length > 0 && (
-        <span className="bg-amber-600 text-white text-[11px] font-black px-2 py-0.5 rounded-full">
-          {
-            profiles.filter(
-              p => p.status === 'archived' || (p as any).isArchived
-            ).length
-          }
-        </span>
-      )}
-    </button>
-
-    {/* Contact Us Settings */}
-    <button
-      onClick={() => setActiveTab('contactSettings')}
-      className={`flex items-center justify-center gap-2 py-3 px-3 border-b-2 transition-all whitespace-nowrap relative ${
-        activeTab === 'contactSettings'
-          ? 'border-saffron text-saffron font-bold'
-          : 'border-transparent text-stone-500 hover:text-stone-900'
-      }`}
-    >
-      <PhoneCall className="w-4 h-4 text-emerald-600 shrink-0" />
-      <span>Contact Us Settings</span>
-    </button>
-
-    {/* Member Reviews & Feedback */}
-    <button
-      onClick={() => setActiveTab('reviews')}
-      className={`flex items-center justify-center gap-2 py-3 px-3 border-b-2 transition-all whitespace-nowrap relative ${
-        activeTab === 'reviews'
-          ? 'border-saffron text-saffron font-bold'
-          : 'border-transparent text-stone-500 hover:text-stone-900'
-      }`}
-    >
-      <Star className="w-4 h-4 text-amber-500 fill-amber-500 shrink-0" />
-      <span>Member Reviews & Feedback ({reviewsList.length})</span>
-      {reviewsList.filter(r => r.status === 'pending').length > 0 && (
-        <span className="bg-amber-500 text-white text-[11px] font-black px-2 py-0.5 rounded-full">
-          {reviewsList.filter(r => r.status === 'pending').length}
-        </span>
-      )}
-    </button>
-
-  </div>
-</div>
+      {/* Navigation Tabs with Circular Icon Containers */}
+      <div className="bg-stone-50/80 p-2.5 sm:p-3 rounded-3xl border border-stone-200/80 mb-8 shadow-sm">
+        <div className="flex flex-wrap gap-2">
+          {[
+            { id: 'overview', label: t('admin.systemStats', 'Overview'), icon: BarChart2, badge: null },
+            { id: 'pending', label: t('admin.pendingApprovals', 'Pending Approvals'), icon: Clock, badge: pendingProfiles.length > 0 ? pendingProfiles.length : null, badgeColor: 'bg-saffron text-white' },
+            { id: 'members', label: `${t('admin.allProfiles', 'Member Profiles')} (${profiles.length})`, icon: User, badge: null },
+            { id: 'subscriptions', label: 'Subscriptions', icon: Sparkles, badge: null },
+            { id: 'zeroMatches', label: '0 Matches', icon: UserX, badge: zeroMatchProfiles.length > 0 ? zeroMatchProfiles.length : null, badgeColor: 'bg-orange-600 text-white' },
+            { id: 'adminNotifications', label: 'Notifications & Queries', icon: Bell, badge: (newQueriesCount + unreadNotifsCount) > 0 ? (newQueriesCount + unreadNotifsCount) : null, badgeColor: 'bg-saffron text-white' },
+            { id: 'reviews', label: `Reviews & Feedback (${reviewsList.length})`, icon: Star, badge: reviewsList.filter(r => r.status === 'pending').length > 0 ? reviewsList.filter(r => r.status === 'pending').length : null, badgeColor: 'bg-amber-500 text-white' },
+            { id: 'news', label: `Community News (${newsList.length})`, icon: Newspaper, badge: null },
+            { id: 'admins', label: `${t('admin.adminUsers', 'Admins')} (${adminUsers.length})`, icon: UserPlus, badge: null },
+            { id: 'sampleAccounts', label: 'Test Accounts', icon: Database, badge: null },
+            { id: 'deletionRequests', label: 'Deletion Requests', icon: Trash2, badge: deletionProfiles.length > 0 ? deletionProfiles.length : null, badgeColor: 'bg-red-600 text-white' },
+            { id: 'archived', label: 'Archived (30d)', icon: Clock, badge: profiles.filter(p => p.status === 'archived' || (p as any).isArchived).length > 0 ? profiles.filter(p => p.status === 'archived' || (p as any).isArchived).length : null, badgeColor: 'bg-amber-600 text-white' },
+            { id: 'contactSettings', label: 'Contact Settings', icon: PhoneCall, badge: null },
+          ].map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
+                className={`group flex items-center gap-2 px-3 py-2 rounded-2xl font-bold text-xs sm:text-sm transition-all border ${
+                  isActive
+                    ? 'bg-saffron text-white border-saffron shadow-sm shadow-saffron/20'
+                    : 'bg-white text-stone-600 border-stone-200 hover:bg-stone-100 hover:text-stone-900'
+                }`}
+              >
+                <div
+                  className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors shrink-0 ${
+                    isActive
+                      ? 'bg-white/20 text-white'
+                      : 'bg-stone-100 text-stone-500 group-hover:bg-saffron/10 group-hover:text-saffron'
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                </div>
+                <span>{tab.label}</span>
+                {tab.badge !== null && (
+                  <span
+                    className={`text-[11px] font-black px-2 py-0.5 rounded-full ${
+                      isActive ? 'bg-white text-saffron' : tab.badgeColor || 'bg-saffron text-white'
+                    }`}
+                  >
+                    {tab.badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
       {/* TAB 1: OVERVIEW STATS */}
       {activeTab === 'overview' && (
@@ -1164,6 +1087,7 @@ export default function Admin() {
                       <th className="p-4">Gender</th>
                       <th className="p-4">Age</th>
                       <th className="p-4">Contact</th>
+                      <th className="p-4">Membership</th>
                       <th className="p-4">Status</th>
                       <th className="p-4 text-right">Actions</th>
                     </tr>
@@ -1171,6 +1095,7 @@ export default function Admin() {
                   <tbody className="divide-y divide-stone-100 text-sm">
                     {paginatedMembers.map((p) => {
                       const pId = getDisplayProfileId(p);
+                      const subDetails = getSubscriptionDetails(p as any);
                       return (
                         <tr key={p.uid} className="hover:bg-stone-50/80 transition-colors">
                           <td className="p-4">
@@ -1195,6 +1120,22 @@ export default function Admin() {
                         <td className="p-4 text-stone-700 font-medium">{p.gender}</td>
                         <td className="p-4 text-stone-700 font-medium">{p.age} Yrs</td>
                         <td className="p-4 text-stone-700 font-mono text-xs">{p.contactNumber || 'N/A'}</td>
+                        <td className="p-4">
+                          <span
+                            className={`px-3 py-1 rounded-full text-xs font-bold border inline-flex items-center gap-1.5 ${subDetails.badgeColor}`}
+                          >
+                            {subDetails.isActive ? (
+                              <>
+                                <Sparkles className="w-3 h-3 text-emerald-600" />
+                                <span>Active ({subDetails.daysRemaining}d left)</span>
+                              </>
+                            ) : subDetails.status === 'expired' ? (
+                              <span>Expired</span>
+                            ) : (
+                              <span>Free / Inactive</span>
+                            )}
+                          </span>
+                        </td>
                         <td className="p-4">
                           <span
                             className={`px-3 py-1 rounded-full text-xs font-bold ${
@@ -1310,6 +1251,245 @@ export default function Admin() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* TAB: SUBSCRIPTION MANAGEMENT */}
+      {activeTab === 'subscriptions' && (
+        <div className="space-y-8">
+          {/* Top Banner & KPI Stat Cards */}
+          <div className="bg-gradient-to-r from-stone-900 via-amber-950 to-stone-900 text-white rounded-3xl p-6 sm:p-8 shadow-xl border border-amber-500/20">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+              <div>
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="p-2.5 bg-amber-500/20 text-amber-400 rounded-2xl border border-amber-400/30">
+                    <Sparkles className="w-6 h-6" />
+                  </div>
+                  <h3 className="text-2xl font-serif font-bold text-white">Membership & Subscription Management</h3>
+                </div>
+                <p className="text-stone-300 text-sm max-w-2xl">
+                  Manage all member annual subscriptions (₹799/year), review payment statuses, manually grant or extend memberships, and inspect transaction logs.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3 bg-white/10 backdrop-blur-md px-5 py-3 rounded-2xl border border-white/10 shrink-0">
+                <div className="text-right">
+                  <p className="text-xs uppercase font-bold text-stone-300">Est. Total Revenue</p>
+                  <p className="text-2xl font-black text-amber-400">
+                    ₹{(profiles.filter(p => isSubscriptionActive(p)).length * ANNUAL_SUBSCRIPTION_PRICE).toLocaleString('en-IN')}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-6 pt-6 border-t border-stone-800">
+              <div className="bg-stone-800/80 p-4 rounded-2xl border border-stone-700/60">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400">Total Members</p>
+                <p className="text-2xl font-black text-stone-100 mt-1">{profiles.length}</p>
+              </div>
+
+              <div className="bg-emerald-950/40 p-4 rounded-2xl border border-emerald-500/30">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-300">Active Subscribers</p>
+                <p className="text-2xl font-black text-emerald-400 mt-1">
+                  {profiles.filter(p => isSubscriptionActive(p)).length}
+                </p>
+              </div>
+
+              <div className="bg-amber-950/40 p-4 rounded-2xl border border-amber-500/30">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-amber-300">Expired Memberships</p>
+                <p className="text-2xl font-black text-amber-400 mt-1">
+                  {profiles.filter(p => (p as any).subscriptionStatus === 'expired').length}
+                </p>
+              </div>
+
+              <div className="bg-stone-800/80 p-4 rounded-2xl border border-stone-700/60">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400">Inactive / Non-Paid</p>
+                <p className="text-2xl font-black text-stone-300 mt-1">
+                  {profiles.filter(p => !isSubscriptionActive(p) && (p as any).subscriptionStatus !== 'expired').length}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Filter Bar */}
+          <div className="bg-white p-4 sm:p-6 rounded-3xl border border-stone-200 shadow-sm flex flex-col md:flex-row gap-4 items-center justify-between">
+            <div className="relative w-full md:w-80">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-stone-400" />
+              <input
+                type="text"
+                placeholder="Search member name, ID, phone..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-stone-200 text-sm focus:border-saffron focus:ring-saffron"
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {[
+                { key: 'all', label: `All (${profiles.length})` },
+                { key: 'active', label: `Active (${profiles.filter(p => isSubscriptionActive(p)).length})` },
+                { key: 'expired', label: `Expired (${profiles.filter(p => (p as any).subscriptionStatus === 'expired').length})` },
+                { key: 'inactive', label: `Inactive (${profiles.filter(p => !isSubscriptionActive(p) && (p as any).subscriptionStatus !== 'expired').length})` }
+              ].map(f => (
+                <button
+                  key={f.key}
+                  type="button"
+                  onClick={() => setSubscriptionFilter(f.key as any)}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                    subscriptionFilter === f.key
+                      ? 'bg-saffron text-white shadow-xs'
+                      : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Subscription Members Table */}
+          <div className="bg-white rounded-3xl shadow-sm border border-stone-200 overflow-hidden p-4 sm:p-6 space-y-4">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-sm">
+                <thead>
+                  <tr className="bg-stone-50 border-b border-stone-200 text-stone-500 text-xs font-bold uppercase tracking-wider">
+                    <th className="p-4">Profile ID</th>
+                    <th className="p-4">Member Name</th>
+                    <th className="p-4">Contact Details</th>
+                    <th className="p-4">Plan & Status</th>
+                    <th className="p-4">Validity Dates</th>
+                    <th className="p-4 text-right">Admin Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-stone-100">
+                  {profiles
+                    .filter(p => {
+                      const isActive = isSubscriptionActive(p);
+                      if (subscriptionFilter === 'active') return isActive;
+                      if (subscriptionFilter === 'expired') return (p as any).subscriptionStatus === 'expired';
+                      if (subscriptionFilter === 'inactive') return !isActive && (p as any).subscriptionStatus !== 'expired';
+                      return true;
+                    })
+                    .filter(p => {
+                      if (!searchTerm.trim()) return true;
+                      const term = searchTerm.toLowerCase();
+                      const name = `${p.firstName} ${p.lastName}`.toLowerCase();
+                      const pId = getDisplayProfileId(p).toLowerCase();
+                      const phone = p.contactNumber?.toLowerCase() || '';
+                      return name.includes(term) || pId.includes(term) || phone.includes(term);
+                    })
+                    .map(p => {
+                      const subDetails = getSubscriptionDetails(p);
+                      const pId = getDisplayProfileId(p);
+
+                      return (
+                        <tr key={p.uid} className="hover:bg-stone-50/80 transition-colors">
+                          <td className="p-4">
+                            <span className="px-2.5 py-1 rounded-md text-xs font-mono font-bold bg-stone-900 text-amber-300 border border-amber-400/20 shadow-xs">
+                              {pId}
+                            </span>
+                          </td>
+                          <td className="p-4">
+                            <div className="font-bold text-stone-900">{p.firstName} {p.lastName}</div>
+                            <div className="text-xs text-stone-400">{p.gender} &bull; {p.age} Yrs</div>
+                          </td>
+                          <td className="p-4 text-xs font-mono text-stone-700">
+                            <div>📞 {p.contactNumber ? `+91 ${p.contactNumber}` : 'N/A'}</div>
+                            {p.email && <div className="text-stone-500 font-sans">✉️ {p.email}</div>}
+                          </td>
+                          <td className="p-4">
+                            <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold border ${subDetails.badgeColor}`}>
+                              <ShieldCheck className="w-3.5 h-3.5" />
+                              {subDetails.label}
+                            </span>
+                            <div className="text-[11px] text-stone-500 mt-1 font-medium">
+                              {subDetails.isActive ? 'Annual Plan (₹799)' : 'No Active Plan'}
+                            </div>
+                          </td>
+                          <td className="p-4 text-xs">
+                            {subDetails.isActive ? (
+                              <>
+                                <div className="font-bold text-stone-800">Valid: {subDetails.startDate} - {subDetails.endDate}</div>
+                                <div className="text-emerald-700 font-bold mt-0.5">{subDetails.daysRemaining} days left</div>
+                              </>
+                            ) : (
+                              <span className="text-stone-400 font-medium">Not Subscribed</span>
+                            )}
+                          </td>
+                          <td className="p-4 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                disabled={actionLoading === p.uid}
+                                onClick={async () => {
+                                  try {
+                                    setActionLoading(p.uid);
+                                    await activateSubscriptionInFirestore(
+                                      p.uid,
+                                      {
+                                        success: true,
+                                        transactionId: `ADMIN_GRANT_${Date.now()}`,
+                                        orderId: `ADMIN_ORD_${Date.now()}`,
+                                        amount: 799,
+                                        currency: 'INR',
+                                        provider: 'admin_manual',
+                                        paymentDate: new Date().toISOString(),
+                                        message: 'Granted manually by Administrator'
+                                      },
+                                      'admin',
+                                      getDisplayProfileId(p)
+                                    );
+                                    setToast({ type: 'success', text: `1-Year Subscription granted to ${p.firstName}!` });
+                                  } catch (err: any) {
+                                    setToast({ type: 'error', text: err.message || 'Failed to activate subscription.' });
+                                  } finally {
+                                    setActionLoading(null);
+                                  }
+                                }}
+                                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1"
+                              >
+                                <CheckCircle className="w-3.5 h-3.5" />
+                                <span>{subDetails.isActive ? '+1 Year' : 'Grant Membership'}</span>
+                              </button>
+
+                              {subDetails.isActive && (
+                                <button
+                                  type="button"
+                                  disabled={actionLoading === p.uid}
+                                  onClick={async () => {
+                                    try {
+                                      setActionLoading(p.uid);
+                                      await deactivateSubscriptionInFirestore(p.uid, 'Cancelled by Administrator');
+                                      setToast({ type: 'success', text: `Subscription revoked for ${p.firstName}.` });
+                                    } catch (err: any) {
+                                      setToast({ type: 'error', text: err.message || 'Failed to revoke subscription.' });
+                                    } finally {
+                                      setActionLoading(null);
+                                    }
+                                  }}
+                                  className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl text-xs font-bold transition-all border border-red-200"
+                                >
+                                  Revoke
+                                </button>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() => navigate(`/admin/edit/${p.uid}`)}
+                                className="p-1.5 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-xl font-bold transition-all"
+                                title="Edit Profile & Credentials"
+                              >
+                                <Edit className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1449,142 +1629,51 @@ export default function Admin() {
                 onClick={() => setNotificationFilter('all')}
                 className={`px-4 py-2 rounded-xl transition-all ${notificationFilter === 'all' ? 'bg-saffron text-white' : 'bg-stone-800 text-stone-300 hover:bg-stone-700'}`}
               >
-                All Records ({contactQueries.length + adminNotifications.length + reviewsList.length})
+                All Notifications ({contactQueries.length + adminNotifications.length})
               </button>
               <button
                 onClick={() => setNotificationFilter('queries')}
                 className={`px-4 py-2 rounded-xl transition-all ${notificationFilter === 'queries' ? 'bg-saffron text-white' : 'bg-stone-800 text-stone-300 hover:bg-stone-700'}`}
               >
-                Contact & Support Queries ({contactQueries.filter(q => q.subject !== 'Website Feedback').length})
+                Contact & Support Inquiries ({contactQueries.filter(q => q.subject !== 'Website Feedback').length})
               </button>
               <button
                 onClick={() => setNotificationFilter('feedback')}
                 className={`px-4 py-2 rounded-xl transition-all ${notificationFilter === 'feedback' ? 'bg-saffron text-white' : 'bg-stone-800 text-stone-300 hover:bg-stone-700'}`}
               >
-                Feedback & Reviews Submissions ({reviewsList.length + contactQueries.filter(q => q.subject === 'Website Feedback').length})
+                Direct Feedback Messages ({contactQueries.filter(q => q.subject === 'Website Feedback').length})
               </button>
               <button
                 onClick={() => setNotificationFilter('newProfiles')}
                 className={`px-4 py-2 rounded-xl transition-all ${notificationFilter === 'newProfiles' ? 'bg-saffron text-white' : 'bg-stone-800 text-stone-300 hover:bg-stone-700'}`}
               >
-                New Registration Notifications ({adminNotifications.length})
+                New Registration Alerts ({adminNotifications.length})
               </button>
             </div>
           </div>
 
-          {/* Submitted Member Feedback & Reviews Stream */}
-          {(notificationFilter === 'all' || notificationFilter === 'feedback') && (
-            <div className="space-y-4">
-              <h4 className="text-lg font-serif font-bold text-stone-900 flex items-center gap-2">
-                <Star className="w-5 h-5 text-amber-500 fill-amber-500" />
-                <span>Submitted Feedback & Member Reviews ({reviewsList.length})</span>
-              </h4>
-
-              {reviewsList.length === 0 ? (
-                <div className="bg-white rounded-3xl p-8 text-center border border-stone-200">
-                  <Star className="w-10 h-10 text-stone-300 mx-auto mb-2" />
-                  <p className="text-stone-600 text-sm font-medium">No feedback or reviews submitted yet.</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 gap-4">
-                  {reviewsList.map((rev) => (
-                    <div key={rev.id} className="bg-white rounded-3xl p-6 border border-stone-200/90 shadow-sm space-y-4 hover:border-saffron/40 transition-all">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-stone-100 pb-3">
-                        <div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <h5 className="font-serif font-bold text-stone-900 text-lg">{rev.name}</h5>
-                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider ${
-                              rev.status === 'approved'
-                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                                : rev.status === 'rejected'
-                                ? 'bg-red-100 text-red-800 border border-red-300'
-                                : 'bg-amber-100 text-amber-800 border border-amber-300'
-                            }`}>
-                              {rev.status || 'pending'}
-                            </span>
-                            {rev.showOnHome && (
-                              <span className="bg-saffron text-white px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider shadow-xs">
-                                Featured on Home Page
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex flex-wrap items-center gap-3 text-xs text-stone-500 mt-1 font-medium">
-                            <span>📱 {rev.phone || 'N/A'}</span>
-                            {rev.email && <span>✉️ {rev.email}</span>}
-                            <span>🆔 {rev.uid ? `UID: ${rev.uid}` : 'Guest User'}</span>
-                            {rev.createdAt && <span>📅 {new Date(rev.createdAt).toLocaleString('en-IN')}</span>}
-                          </div>
-                        </div>
-
-                        {/* Star Rating Display */}
-                        <div className="flex items-center gap-1 bg-amber-50 border border-amber-200/80 px-3 py-1.5 rounded-xl w-fit">
-                          {[1, 2, 3, 4, 5].map((s) => (
-                            <Star
-                              key={s}
-                              className={`w-4 h-4 ${
-                                s <= (rev.rating || 5)
-                                  ? 'text-amber-500 fill-amber-500'
-                                  : 'text-stone-300 fill-stone-100'
-                              }`}
-                            />
-                          ))}
-                          <span className="text-xs font-bold text-amber-900 ml-1.5">
-                            {rev.rating || 5}/5
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Review Text Body */}
-                      <div className="bg-stone-50 p-4 rounded-xl border border-stone-200/60 text-stone-800 text-sm italic leading-relaxed">
-                        "{rev.reviewText}"
-                      </div>
-
-                      {/* Action Controls & Show on Home Page Toggle */}
-                      <div className="flex flex-wrap items-center justify-between gap-4 pt-1">
-                        <label className="inline-flex items-center gap-2.5 cursor-pointer bg-amber-50/80 hover:bg-amber-100/90 px-3.5 py-2 rounded-xl text-xs font-bold text-amber-900 transition-all border border-amber-300/80 shadow-xs">
-                          <input
-                            type="checkbox"
-                            checked={rev.showOnHome === true}
-                            onChange={() => handleToggleReviewHome(rev.id, rev.showOnHome === true)}
-                            className="w-4 h-4 accent-saffron rounded cursor-pointer"
-                          />
-                          <span>Show on Home Page</span>
-                        </label>
-
-                        <div className="flex items-center gap-2">
-                          {rev.status !== 'approved' && (
-                            <button
-                              onClick={() => handleReviewStatus(rev.id, 'approved')}
-                              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1"
-                            >
-                              <CheckCircle className="w-3.5 h-3.5" />
-                              <span>Approve</span>
-                            </button>
-                          )}
-                          {rev.status !== 'rejected' && (
-                            <button
-                              onClick={() => handleReviewStatus(rev.id, 'rejected')}
-                              className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1"
-                            >
-                              <XCircle className="w-3.5 h-3.5" />
-                              <span>Reject</span>
-                            </button>
-                          )}
-                          <button
-                            onClick={() => handleDeleteReview(rev.id)}
-                            className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl text-xs font-bold transition-all border border-red-200 flex items-center gap-1"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                            <span>Delete</span>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+          {/* Quick banner link to dedicated Reviews & Feedback Tab */}
+          <div className="bg-amber-50/80 border border-amber-200 rounded-3xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-amber-500 text-white rounded-2xl">
+                <Star className="w-5 h-5 fill-white" />
+              </div>
+              <div>
+                <h4 className="font-serif font-bold text-amber-950 text-sm">Manage Member Ratings & Feedback Reviews ({reviewsList.length})</h4>
+                <p className="text-amber-800 text-xs mt-0.5">
+                  Approve, feature on homepage carousel, or moderate member testimonial reviews in the dedicated tab.
+                </p>
+              </div>
             </div>
-          )}
+            <button
+              type="button"
+              onClick={() => setActiveTab('reviews')}
+              className="px-4 py-2 bg-amber-700 hover:bg-amber-800 text-white rounded-xl text-xs font-bold transition-all shrink-0 shadow-xs flex items-center gap-1.5"
+            >
+              <span>Open Member Reviews Tab</span>
+              <Star className="w-3.5 h-3.5 fill-amber-300 text-amber-300" />
+            </button>
+          </div>
 
           {/* Database Admin Notifications (New Registrations Alert Stream) */}
           {(notificationFilter === 'all' || notificationFilter === 'newProfiles') && adminNotifications.length > 0 && (
@@ -2133,7 +2222,7 @@ export default function Admin() {
                     : 'bg-orange-50 text-saffron hover:bg-orange-100'
                 }`}
               >
-                Featured on Home ({reviewsList.filter(r => r.showOnHome).length})
+                Featured Reviews ({reviewsList.filter(r => r.showOnHome || r.isFeatured || r.featured).length})
               </button>
             </div>
           </div>
@@ -2143,7 +2232,7 @@ export default function Admin() {
             if (reviewFilter === 'pending') return r.status === 'pending';
             if (reviewFilter === 'approved') return r.status === 'approved';
             if (reviewFilter === 'rejected') return r.status === 'rejected';
-            if (reviewFilter === 'home') return r.showOnHome === true;
+            if (reviewFilter === 'home') return r.showOnHome === true || r.isFeatured === true || r.featured === true;
             return true;
           }).length === 0 ? (
             <div className="text-center py-12 text-stone-500 bg-stone-50 rounded-2xl border border-stone-200/60">
@@ -2157,7 +2246,7 @@ export default function Admin() {
                 if (reviewFilter === 'pending') return r.status === 'pending';
                 if (reviewFilter === 'approved') return r.status === 'approved';
                 if (reviewFilter === 'rejected') return r.status === 'rejected';
-                if (reviewFilter === 'home') return r.showOnHome === true;
+                if (reviewFilter === 'home') return r.showOnHome === true || r.isFeatured === true || r.featured === true;
                 return true;
               }).map((rev) => (
                 <div
@@ -2179,9 +2268,9 @@ export default function Admin() {
                         >
                           {rev.status || 'pending'}
                         </span>
-                        {rev.showOnHome && (
+                        {(rev.showOnHome || rev.isFeatured || rev.featured) && (
                           <span className="bg-saffron text-white px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider shadow-xs">
-                            Featured on Home Page
+                            Featured Review
                           </span>
                         )}
                       </div>
@@ -2259,6 +2348,185 @@ export default function Admin() {
                         <Trash2 className="w-3.5 h-3.5" />
                         <span>Delete</span>
                       </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Community News Tab */}
+      {activeTab === 'news' && (
+        <div className="space-y-6">
+          {/* Header & Controls */}
+          <div className="bg-white rounded-3xl p-6 sm:p-8 border border-stone-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div>
+              <div className="flex items-center gap-2 text-saffron font-bold text-sm mb-1">
+                <Newspaper className="w-5 h-5" />
+                <span>Community News & Events Publisher</span>
+              </div>
+              <h2 className="text-2xl font-serif font-bold text-stone-900">Nashik Teli Samaj News & Articles</h2>
+              <p className="text-stone-500 text-xs mt-1">
+                Articles published here are synced in real-time to Firestore and displayed live on the homepage Community News carousel.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              {newsList.length === 0 && (
+                <button
+                  type="button"
+                  disabled={actionLoading === 'seed_news'}
+                  onClick={handleSeedNews}
+                  className="px-4 py-2.5 bg-stone-100 hover:bg-stone-200 text-stone-800 rounded-2xl font-bold text-xs transition-all flex items-center gap-2"
+                >
+                  <Sparkles className="w-4 h-4 text-amber-600" />
+                  <span>{actionLoading === 'seed_news' ? 'Seeding...' : 'Load Default Articles'}</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingNewsItem(null);
+                  setNewsModalOpen(true);
+                }}
+                className="bg-saffron hover:bg-orange-600 text-white px-5 py-2.5 rounded-2xl font-bold transition-all shadow-md flex items-center gap-2 text-sm"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Write New Article</span>
+              </button>
+            </div>
+          </div>
+
+          {/* News List */}
+          {newsList.length === 0 ? (
+            <div className="bg-white rounded-3xl p-12 text-center border border-stone-200">
+              <Newspaper className="w-12 h-12 text-stone-300 mx-auto mb-3" />
+              <h3 className="text-lg font-serif font-bold text-stone-800 mb-1">No News Articles Found</h3>
+              <p className="text-stone-500 text-xs max-w-md mx-auto mb-6">
+                Publish community events, vadhu-var melava updates, achievements, or matrimonial announcements.
+              </p>
+              <div className="flex items-center justify-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleSeedNews}
+                  className="px-5 py-2.5 bg-stone-100 hover:bg-stone-200 text-stone-800 rounded-xl font-bold text-xs"
+                >
+                  Seed Default Samaj News
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingNewsItem(null);
+                    setNewsModalOpen(true);
+                  }}
+                  className="px-5 py-2.5 bg-saffron text-white rounded-xl font-bold text-xs hover:bg-orange-600 shadow-sm"
+                >
+                  Create Custom Article
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {newsList.map((item) => (
+                <div
+                  key={item.id}
+                  className="bg-white rounded-3xl border border-stone-200/90 shadow-sm overflow-hidden flex flex-col hover:border-saffron/50 transition-all group"
+                >
+                  {/* Article Thumbnail */}
+                  <div className="relative h-48 bg-stone-100 overflow-hidden">
+                    <img
+                      src={item.imageUrl}
+                      alt={item.title}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1544717305-2782549b5136?auto=format&fit=crop&q=80&w=800';
+                      }}
+                    />
+                    <div className="absolute top-3 left-3 flex items-center gap-2">
+                      <span className="px-2.5 py-1 bg-black/70 backdrop-blur-md text-white text-[10px] font-black uppercase rounded-lg tracking-wider">
+                        {item.category}
+                      </span>
+                      <span
+                        className={`px-2.5 py-1 text-[10px] font-black uppercase rounded-lg tracking-wider ${
+                          item.published !== false
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-amber-600 text-white'
+                        }`}
+                      >
+                        {item.published !== false ? 'Published' : 'Draft'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Article Body */}
+                  <div className="p-5 flex-1 flex flex-col justify-between space-y-4">
+                    <div>
+                      <div className="flex items-center gap-3 text-xs text-stone-500 mb-2 font-medium">
+                        <span className="flex items-center gap-1">
+                          <Calendar className="w-3.5 h-3.5 text-saffron" />
+                          {item.date}
+                        </span>
+                        {item.location && (
+                          <span className="flex items-center gap-1">
+                            <MapPin className="w-3.5 h-3.5 text-saffron" />
+                            {item.location}
+                          </span>
+                        )}
+                      </div>
+
+                      <h3 className="font-serif font-bold text-stone-900 text-base leading-snug line-clamp-2 mb-1">
+                        {item.title}
+                      </h3>
+                      {item.titleMr && (
+                        <h4 className="font-serif font-bold text-stone-600 text-sm leading-snug line-clamp-1 mb-2">
+                          {item.titleMr}
+                        </h4>
+                      )}
+
+                      <p className="text-stone-600 text-xs line-clamp-3 leading-relaxed">
+                        {item.summary}
+                      </p>
+                    </div>
+
+                    {/* Action Bar */}
+                    <div className="pt-3 border-t border-stone-100 flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        disabled={actionLoading === item.id}
+                        onClick={() => handleToggleNewsPublish(item)}
+                        className={`text-xs font-bold px-3 py-1.5 rounded-xl border transition-all ${
+                          item.published !== false
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                            : 'bg-stone-100 text-stone-700 border-stone-200 hover:bg-stone-200'
+                        }`}
+                      >
+                        {item.published !== false ? 'Active on Home' : 'Publish to Home'}
+                      </button>
+
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingNewsItem(item);
+                            setNewsModalOpen(true);
+                          }}
+                          className="p-2 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-xl transition-all"
+                          title="Edit Article"
+                        >
+                          <Edit3 className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={actionLoading === item.id}
+                          onClick={() => handleDeleteNews(item.id)}
+                          className="p-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-xl transition-all"
+                          title="Delete Article"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -2464,15 +2732,26 @@ export default function Admin() {
             <div className="space-y-4">
               <h3 className="text-sm font-bold text-stone-900 uppercase tracking-wider border-b border-stone-100 pb-2 flex items-center gap-2">
                 <Globe className="w-4 h-4 text-saffron" />
-                <span>Social Media Links</span>
+                <span>Social Media Links & Visibility</span>
               </h3>
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                <div>
-                  <label className="block text-xs font-bold text-stone-700 uppercase mb-1.5 flex items-center gap-1.5">
-                    <Facebook className="w-4 h-4 text-blue-600" />
-                    <span>Facebook URL</span>
-                  </label>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-stone-700 uppercase flex items-center gap-1.5">
+                      <Facebook className="w-4 h-4 text-blue-600" />
+                      <span>Facebook</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 text-xs font-semibold text-stone-600 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={contactForm.showFacebook !== false}
+                        onChange={(e) => setContactForm({ ...contactForm, showFacebook: e.target.checked })}
+                        className="w-3.5 h-3.5 accent-saffron rounded"
+                      />
+                      <span>Show on site</span>
+                    </label>
+                  </div>
                   <input
                     type="url"
                     value={contactForm.facebookUrl || ''}
@@ -2482,11 +2761,22 @@ export default function Admin() {
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-stone-700 uppercase mb-1.5 flex items-center gap-1.5">
-                    <Instagram className="w-4 h-4 text-pink-600" />
-                    <span>Instagram URL</span>
-                  </label>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-stone-700 uppercase flex items-center gap-1.5">
+                      <Instagram className="w-4 h-4 text-pink-600" />
+                      <span>Instagram</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 text-xs font-semibold text-stone-600 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={contactForm.showInstagram !== false}
+                        onChange={(e) => setContactForm({ ...contactForm, showInstagram: e.target.checked })}
+                        className="w-3.5 h-3.5 accent-saffron rounded"
+                      />
+                      <span>Show on site</span>
+                    </label>
+                  </div>
                   <input
                     type="url"
                     value={contactForm.instagramUrl || ''}
@@ -2496,11 +2786,22 @@ export default function Admin() {
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-stone-700 uppercase mb-1.5 flex items-center gap-1.5">
-                    <Youtube className="w-4 h-4 text-red-600" />
-                    <span>YouTube Channel URL</span>
-                  </label>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-stone-700 uppercase flex items-center gap-1.5">
+                      <Youtube className="w-4 h-4 text-red-600" />
+                      <span>YouTube</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 text-xs font-semibold text-stone-600 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={contactForm.showYoutube !== false}
+                        onChange={(e) => setContactForm({ ...contactForm, showYoutube: e.target.checked })}
+                        className="w-3.5 h-3.5 accent-saffron rounded"
+                      />
+                      <span>Show on site</span>
+                    </label>
+                  </div>
                   <input
                     type="url"
                     value={contactForm.youtubeUrl || ''}
@@ -2510,11 +2811,22 @@ export default function Admin() {
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-stone-700 uppercase mb-1.5 flex items-center gap-1.5">
-                    <Linkedin className="w-4 h-4 text-blue-700" />
-                    <span>LinkedIn URL</span>
-                  </label>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-stone-700 uppercase flex items-center gap-1.5">
+                      <Linkedin className="w-4 h-4 text-blue-700" />
+                      <span>LinkedIn</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 text-xs font-semibold text-stone-600 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={contactForm.showLinkedin !== false}
+                        onChange={(e) => setContactForm({ ...contactForm, showLinkedin: e.target.checked })}
+                        className="w-3.5 h-3.5 accent-saffron rounded"
+                      />
+                      <span>Show on site</span>
+                    </label>
+                  </div>
                   <input
                     type="url"
                     value={contactForm.linkedinUrl || ''}
@@ -2524,11 +2836,22 @@ export default function Admin() {
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-stone-700 uppercase mb-1.5 flex items-center gap-1.5">
-                    <Twitter className="w-4 h-4 text-sky-500" />
-                    <span>Twitter / X URL</span>
-                  </label>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-stone-700 uppercase flex items-center gap-1.5">
+                      <Twitter className="w-4 h-4 text-sky-500" />
+                      <span>Twitter / X</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 text-xs font-semibold text-stone-600 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={contactForm.showTwitter !== false}
+                        onChange={(e) => setContactForm({ ...contactForm, showTwitter: e.target.checked })}
+                        className="w-3.5 h-3.5 accent-saffron rounded"
+                      />
+                      <span>Show on site</span>
+                    </label>
+                  </div>
                   <input
                     type="url"
                     value={contactForm.twitterUrl || ''}
@@ -2677,6 +3000,22 @@ export default function Admin() {
       <WelcomeEmailPreviewModal
         isOpen={emailModalOpen}
         onClose={() => setEmailModalOpen(false)}
+      />
+
+      {/* Community News Article Creation & Editing Modal */}
+      <AdminCommunityNewsModal
+        isOpen={newsModalOpen}
+        newsItem={editingNewsItem}
+        onClose={() => {
+          setNewsModalOpen(false);
+          setEditingNewsItem(null);
+        }}
+        onSuccess={() => {
+          setToast({
+            type: 'success',
+            text: editingNewsItem ? 'News article updated in Firestore.' : 'New article published to community news.'
+          });
+        }}
       />
     </div>
   );

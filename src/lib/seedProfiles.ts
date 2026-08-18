@@ -202,15 +202,9 @@ function generate100Profiles(): SeedAccount[] {
 
     const photoUrl = photoList[(i - 1) % photoList.length];
 
-    // Status: 80 Approved (1-80), 10 Pending (81-90), 10 Archived (91-100)
-    let status: 'approved' | 'pending' | 'archived' = 'approved';
-    let isArchived = false;
-    if (i > 80 && i <= 90) {
-      status = 'pending';
-    } else if (i > 90) {
-      status = 'archived';
-      isArchived = true;
-    }
+    // All sample accounts are pre-approved so they do not pollute real pending user registrations
+    const status: 'approved' | 'pending' | 'archived' = 'approved';
+    const isArchived = false;
 
     // Completeness distribution:
     // 1-30: 100% (Complete)
@@ -366,6 +360,11 @@ export async function seedSampleProfilesToFirestore(): Promise<{ count: number; 
       isArchived: account.isArchived || false,
       isFeatured: account.status === 'approved',
       isTestProfile: true,
+      subscriptionPlan: 'annual',
+      subscriptionStatus: 'active',
+      paymentStatus: 'paid',
+      startDate: new Date().toISOString(),
+      endDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       partnerPreferences: account.partnerPreferences || {

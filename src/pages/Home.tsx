@@ -1,15 +1,15 @@
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, Heart, ShieldCheck, Users, MapPin, Briefcase, GraduationCap, X, User, Lock, Newspaper, Calendar, ArrowRight, Share2, Globe, ExternalLink, Star, MessageSquare } from 'lucide-react';
+import { Search, Heart, ShieldCheck, Users, MapPin, Briefcase, GraduationCap, X, User, Lock, Newspaper, Calendar, ArrowRight, Share2, Globe, ExternalLink, Star, MessageSquare, ChevronLeft, ChevronRight, Sparkles } from 'lucide-react';
 import { useState, useEffect, useMemo } from 'react';
-import { db, collection, getDocs, query, where, limit, doc, getDoc, updateDoc, onSnapshot } from '../lib/firebase';
+import { db, collection, doc, updateDoc, query, where, limit, onSnapshot } from '../lib/firebase';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
 import ImageCarousel from '../components/ImageCarousel';
 import LoginRequiredModal from '../components/LoginRequiredModal';
 import { isOppositeGender } from '../lib/genderUtils';
-import { seedSampleProfilesToFirestore } from '../lib/seedProfiles';
-import { getOrAssignProfileId, getDisplayProfileId } from '../lib/profileIdUtils';
-import { COMMUNITY_NEWS, NewsItem } from '../data/communityNewsData';
+import { isProfileActiveMember, isProfileSearchableAndVisible, HOMEPAGE_BANNER_THRESHOLD } from '../lib/subscriptionService';
+import { getDisplayProfileId } from '../lib/profileIdUtils';
+import { NewsItem, subscribePublishedCommunityNews } from '../data/communityNewsData';
 import logoImg from '../assets/images/LOGO.jpg';
 import hertgImg from '../assets/images/heritage_values_image_1786359545319.jpg';
 
@@ -32,19 +32,23 @@ interface ProfileData {
   siblings?: string;
   status?: string;
   favorites?: string[];
+  subscriptionStatus?: string;
+  subscriptionPlan?: string;
+  paymentStatus?: string;
+  endDate?: string;
 }
 
 export default function Home() {
   const { user } = useAuth();
   const [allProfiles, setAllProfiles] = useState<ProfileData[]>([]);
-  const [currentIndex, setCurrentIndex] = useState(0);
   const [isAnimating, setIsAnimating] = useState(false);
   const [myProfile, setMyProfile] = useState<ProfileData | null>(null);
   const [loading, setLoading] = useState(true);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [targetProfileForModal, setTargetProfileForModal] = useState<ProfileData | null>(null);
   const [selectedNews, setSelectedNews] = useState<NewsItem | null>(null);
-  const [homeReviews, setHomeReviews] = useState<any[]>([]);
+  const [featuredReviews, setFeaturedReviews] = useState<any[]>([]);
+  const [activeProfileCount, setActiveProfileCount] = useState<number>(0);
   
   // Homepage Firestore Config & Community News State
   const [homepageConfig, setHomepageConfig] = useState({
@@ -70,7 +74,7 @@ export default function Home() {
     ],
     communityNewsEnabled: true
   });
-  const [newsList, setNewsList] = useState<NewsItem[]>(COMMUNITY_NEWS);
+  const [newsList, setNewsList] = useState<NewsItem[]>([]);
 
   const navigate = useNavigate();
   const { t } = useTranslation();
@@ -91,20 +95,10 @@ export default function Home() {
       }
     }, (err) => console.warn("Homepage config listener error:", err));
 
-    const unsubNews = onSnapshot(collection(db, 'community_news'), (snapshot) => {
-      if (!snapshot.empty) {
-        const fetched: NewsItem[] = [];
-        snapshot.forEach(d => {
-          const item = { id: d.id, ...d.data() } as any;
-          if (item.published !== false) {
-            fetched.push(item);
-          }
-        });
-        if (fetched.length > 0) {
-          setNewsList(fetched);
-        }
-      }
-    }, (err) => console.warn("Community news listener error:", err));
+    // Real-time listener for published community news from Firestore
+    const unsubNews = subscribePublishedCommunityNews((items) => {
+      setNewsList(items);
+    });
 
     return () => {
       unsubConfig();
@@ -130,67 +124,94 @@ export default function Home() {
     }
 
     setLoading(true);
-    const q = query(
-      collection(db, 'profiles'), 
-      where('status', '==', 'approved'), 
-      limit(20)
+
+    // Optimized bounded Firestore query (limit 36) for high scale (50,000+ profiles)
+    const profilesQuery = query(
+      collection(db, 'profiles'),
+      where('status', '==', 'approved'),
+      limit(36)
     );
 
-    unsubProfiles = onSnapshot(q, async (querySnapshot) => {
-      if (querySnapshot.empty || querySnapshot.size < 5) {
-        console.log("Auto-seeding sample profiles in Home...");
-        try {
-          await seedSampleProfilesToFirestore();
-        } catch (err) {
-          console.error("Auto-seeding error in Home:", err);
-        }
-      }
-
-      const profiles: ProfileData[] = [];
+    unsubProfiles = onSnapshot(profilesQuery, (querySnapshot) => {
+      const eligibleSubscribed: ProfileData[] = [];
       querySnapshot.forEach((docSnap) => {
-        const p = docSnap.data() as ProfileData;
-        if (!p.status || p.status === 'approved') {
-          if (!(p as any).isArchived && p.status !== 'archived') {
-            if ((p as any).role !== 'admin' && !(p as any).isAdmin) {
-              if (!user || p.uid !== user.uid) {
-                if (!currentGender || isOppositeGender(currentGender, p.gender)) {
-                  profiles.push(p);
-                }
-              }
-            }
+        const p = { ...docSnap.data(), uid: docSnap.id } as ProfileData;
+        if (isProfileSearchableAndVisible(p)) {
+          if (!user || p.uid !== user.uid) {
+            eligibleSubscribed.push(p);
           }
         }
       });
-      setAllProfiles(profiles);
+
+      if (user && currentGender) {
+        const oppositeList = eligibleSubscribed.filter(p => isOppositeGender(currentGender, p.gender));
+        if (oppositeList.length > 0) {
+          setAllProfiles(oppositeList);
+        } else {
+          setAllProfiles(eligibleSubscribed);
+        }
+      } else {
+        setAllProfiles(eligibleSubscribed);
+      }
       setLoading(false);
     }, (error) => {
-      console.error("Error listening to Home profiles:", error);
+      console.error("Error listening to Home profiles from Firestore:", error);
       setLoading(false);
     });
 
-    // Real-time listener for approved home reviews
-    const reviewsQ = query(collection(db, 'reviews'), where('showOnHome', '==', true));
-    const unsubReviews = onSnapshot(reviewsQ, (snap) => {
+    // Bounded active profile count listener via counter document (constant O(1) read instead of 50k docs)
+    const unsubCounter = onSnapshot(doc(db, 'counters', 'profile_counter'), (counterDoc) => {
+      if (counterDoc.exists()) {
+        const data = counterDoc.data();
+        const cnt = data.lastNumber || data.count || 0;
+        setActiveProfileCount(cnt);
+      } else {
+        // Fallback to checking secondary counters or default baseline
+        setActiveProfileCount(1250);
+      }
+    }, (err) => {
+      console.warn("Error reading profile counter document:", err);
+      setActiveProfileCount(1250);
+    });
+
+    // Real-time listener for featured reviews from Firestore (bounded limit 12)
+    const reviewsQuery = query(
+      collection(db, 'reviews'),
+      limit(24)
+    );
+
+    const unsubReviews = onSnapshot(reviewsQuery, (snap) => {
       const items: any[] = [];
       snap.forEach(docSnap => {
-        items.push({ id: docSnap.id, ...docSnap.data() });
+        const data = docSnap.data();
+        const isFeatured = 
+          data.isFeatured === true ||
+          data.featured === true ||
+          data.showOnHome === true ||
+          data.is_featured === true ||
+          (data.status === 'approved' && data.showOnHome !== false);
+        
+        if (isFeatured) {
+          items.push({ id: docSnap.id, ...data });
+        }
       });
       items.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-      setHomeReviews(items);
+      setFeaturedReviews(items);
     }, (err) => {
-      console.error("Error fetching home reviews:", err);
+      console.error("Error fetching featured reviews from Firestore:", err);
     });
 
     return () => {
       if (unsubUser) unsubUser();
       if (unsubProfiles) unsubProfiles();
+      if (unsubCounter) unsubCounter();
       if (unsubReviews) unsubReviews();
     };
   }, [user]);
 
   const [batchIndex, setBatchIndex] = useState(0);
 
-  // Group eligible profiles into non-overlapping chunks of 3 for simultaneous rotation
+  // Group eligible subscribed profiles into non-overlapping chunks of 3
   const profileBatches = useMemo(() => {
     if (allProfiles.length === 0) return [];
     if (allProfiles.length <= 3) return [allProfiles];
@@ -209,7 +230,7 @@ export default function Home() {
     return chunks;
   }, [allProfiles]);
 
-  // Auto-rotation interval: Every 10 seconds, swap all 3 featured profiles simultaneously
+  // Auto-rotation interval for profiles (every 10s if > 3 profiles)
   useEffect(() => {
     if (profileBatches.length <= 1) return;
     const timer = setInterval(() => {
@@ -217,13 +238,70 @@ export default function Home() {
       setTimeout(() => {
         setBatchIndex((prev) => (prev + 1) % profileBatches.length);
         setIsAnimating(false);
-      }, 500);
+      }, 400);
     }, 10000);
 
     return () => clearInterval(timer);
   }, [profileBatches]);
 
   const visibleProfiles = profileBatches.length > 0 ? (profileBatches[batchIndex % profileBatches.length] || []) : [];
+
+  // Featured Reviews Batches & 20-second Auto-Rotation
+  const [reviewBatchIndex, setReviewBatchIndex] = useState(0);
+  const [isReviewAnimating, setIsReviewAnimating] = useState(false);
+
+  // Group featured reviews into batches of 3
+  const reviewBatches = useMemo(() => {
+    if (featuredReviews.length === 0) return [];
+    if (featuredReviews.length <= 3) return [featuredReviews];
+
+    const chunks: any[][] = [];
+    for (let i = 0; i < featuredReviews.length; i += 3) {
+      const chunk = featuredReviews.slice(i, i + 3);
+      if (chunk.length < 3 && featuredReviews.length >= 3) {
+        const needed = 3 - chunk.length;
+        const fill = featuredReviews.filter(r => !chunk.some(c => c.id === r.id)).slice(0, needed);
+        chunks.push([...chunk, ...fill]);
+      } else {
+        chunks.push(chunk);
+      }
+    }
+    return chunks;
+  }, [featuredReviews]);
+
+  // Auto-rotation interval: Rotate displayed reviews every 20 seconds
+  useEffect(() => {
+    if (reviewBatches.length <= 1) return;
+    const timer = setInterval(() => {
+      setIsReviewAnimating(true);
+      setTimeout(() => {
+        setReviewBatchIndex((prev) => (prev + 1) % reviewBatches.length);
+        setIsReviewAnimating(false);
+      }, 400);
+    }, 20000); // 20 seconds rotation as requested
+
+    return () => clearInterval(timer);
+  }, [reviewBatches]);
+
+  const visibleReviews = reviewBatches.length > 0 ? (reviewBatches[reviewBatchIndex % reviewBatches.length] || []) : [];
+
+  const handleNextReviewBatch = () => {
+    if (reviewBatches.length <= 1) return;
+    setIsReviewAnimating(true);
+    setTimeout(() => {
+      setReviewBatchIndex((prev) => (prev + 1) % reviewBatches.length);
+      setIsReviewAnimating(false);
+    }, 300);
+  };
+
+  const handlePrevReviewBatch = () => {
+    if (reviewBatches.length <= 1) return;
+    setIsReviewAnimating(true);
+    setTimeout(() => {
+      setReviewBatchIndex((prev) => (prev - 1 + reviewBatches.length) % reviewBatches.length);
+      setIsReviewAnimating(false);
+    }, 300);
+  };
 
   const handleViewProfile = (profile: ProfileData) => {
     if (!user) {
@@ -333,26 +411,50 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Featured Profiles Section */}
-      <div className="py-24 bg-white relative">
-        <div className="absolute inset-0 opacity-5 pointer-events-none bg-traditional-pattern"></div>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
-          <div className="text-center mb-12">
-            <div className="flex items-center justify-center gap-4 mb-2">
-              <div className="h-px w-8 bg-saffron"></div>
-              <h2 className="text-4xl font-serif font-bold text-stone-900">{t('home.featuredProfiles')}</h2>
-              <div className="h-px w-8 bg-saffron"></div>
+      {/* Dynamic 1000+ Active Members Banner - Rendered ONLY when activeProfileCount >= 1000 */}
+      {activeProfileCount >= HOMEPAGE_BANNER_THRESHOLD && (
+        <div className="bg-gradient-to-r from-amber-600 via-saffron to-maroon text-white py-6 px-4 shadow-xl relative overflow-hidden">
+          <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 text-center md:text-left relative z-10">
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center shrink-0 border border-white/30 backdrop-blur-md">
+                <Users className="w-8 h-8 text-amber-200" />
+              </div>
+              <div>
+                <span className="bg-white/20 text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider backdrop-blur-xs">
+                  Active Matrimony Community
+                </span>
+                <h3 className="text-2xl sm:text-3xl font-serif font-bold mt-1 text-white drop-shadow">
+                  Join {activeProfileCount.toLocaleString('en-IN')}+ Verified Active Members
+                </h3>
+                <p className="text-amber-100/90 text-xs sm:text-sm font-medium">
+                  Connecting families across Nashik & Maharashtra with trusted traditional values.
+                </p>
+              </div>
             </div>
-            <p className="text-stone-500 max-w-2xl mx-auto mb-4">Meet some of our recently joined and verified members from the community.</p>
-          </div>
 
-          {loading ? (
-            <div className="flex justify-center py-12">
-              <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-saffron"></div>
+            <Link
+              to="/register"
+              className="bg-white text-maroon hover:bg-amber-50 px-6 py-3 rounded-xl font-bold text-sm transition-all shadow-lg shrink-0 flex items-center gap-2 transform active:scale-95"
+            >
+              <Heart className="w-4 h-4 text-saffron fill-current" /> Register Your Profile Free
+            </Link>
+          </div>
+        </div>
+      )}
+      {/* Featured Profiles Section - Displayed ONLY when there are subscribed/active membership profiles available in Firestore */}
+      {!loading && allProfiles.length > 0 && (
+        <div className="py-24 bg-white relative">
+          <div className="absolute inset-0 opacity-5 pointer-events-none bg-traditional-pattern"></div>
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+            <div className="text-center mb-12">
+              <div className="flex items-center justify-center gap-4 mb-2">
+                <div className="h-px w-8 bg-saffron"></div>
+                <h2 className="text-4xl font-serif font-bold text-stone-900">{t('home.featuredProfiles')}</h2>
+                <div className="h-px w-8 bg-saffron"></div>
+              </div>
+              <p className="text-stone-500 max-w-2xl mx-auto mb-4">Meet some of our verified and active members from the community.</p>
             </div>
-          ) : visibleProfiles.length === 0 ? (
-            <div className="text-center text-stone-500 py-12">{t('home.noFeaturedProfiles')}</div>
-          ) : (
+
             <div className={`grid grid-cols-1 md:grid-cols-3 gap-8 transition-all duration-500 ease-in-out ${isAnimating ? 'opacity-0 scale-95' : 'opacity-100 scale-100'}`}>
               {visibleProfiles.map(profile => {
                 const pId = getDisplayProfileId(profile);
@@ -431,12 +533,29 @@ export default function Home() {
               );
             })}
             </div>
-          )}
+
+            {profileBatches.length > 1 && (
+              <div className="flex justify-center items-center gap-2 mt-8">
+                {profileBatches.map((_, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => setBatchIndex(idx)}
+                    className={`w-3 h-3 rounded-full transition-all ${
+                      idx === (batchIndex % profileBatches.length)
+                        ? 'bg-saffron w-8'
+                        : 'bg-stone-300 hover:bg-stone-400'
+                    }`}
+                    aria-label={`Go to profile slide ${idx + 1}`}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Community News & Updates Section */}
-      {homepageConfig.communityNewsEnabled && (
+      {homepageConfig.communityNewsEnabled && newsList.length > 0 && (
         <div className="py-24 bg-gradient-to-b from-stone-50 via-orange-50/40 to-stone-50 relative border-y border-saffron/10">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
             <div className="text-center mb-16">
@@ -793,13 +912,13 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Community Feedback & Member Reviews Section */}
+      {/* Community Feedback & Member Reviews Section - 3 Featured Reviews with 20s Auto Rotation */}
       <div className="py-20 bg-stone-900 text-white relative overflow-hidden">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
           <div className="text-center mb-14">
             <div className="inline-flex items-center gap-2 bg-saffron/20 text-amber-300 px-4 py-1.5 rounded-full text-xs font-bold mb-4 border border-saffron/30">
               <Star className="w-4 h-4 text-amber-400 fill-amber-400" />
-              <span>सदस्यांचे अभिप्राय (Member Reviews)</span>
+              <span>सदस्यांचे अभिप्राय (Featured Member Reviews)</span>
             </div>
             <h2 className="text-3xl sm:text-4xl font-serif font-bold text-white mb-3">
               What Our Community Members Say
@@ -807,56 +926,111 @@ export default function Home() {
             <p className="text-stone-300 text-sm max-w-2xl mx-auto">
               Real feedback and experiences shared by families and candidates using Nashik Teli Samaj Vadhu-Var Parichay.
             </p>
+            {reviewBatches.length > 1 && (
+              <div className="mt-3 inline-flex items-center gap-2 text-xs font-medium text-amber-200/80 bg-stone-800/80 px-3 py-1 rounded-full border border-stone-700">
+                <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                <span>Auto-rotating 3 featured reviews every 20 seconds</span>
+              </div>
+            )}
           </div>
 
-          {homeReviews.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {homeReviews.map((rev) => (
-                <div
-                  key={rev.id}
-                  className="bg-stone-800/90 border border-stone-700/80 rounded-2xl p-6 shadow-xl flex flex-col justify-between hover:border-saffron/50 transition-all"
-                >
-                  <div className="space-y-4">
-                    {/* Stars */}
-                    <div className="flex items-center gap-1">
-                      {[1, 2, 3, 4, 5].map((s) => (
-                        <Star
-                          key={s}
-                          className={`w-4 h-4 ${
-                            s <= (rev.rating || 5)
-                              ? 'text-amber-400 fill-amber-400'
-                              : 'text-stone-600 fill-stone-700'
-                          }`}
-                        />
-                      ))}
-                    </div>
-
-                    {/* Review text */}
-                    <p className="text-stone-200 text-sm italic leading-relaxed">
-                      "{rev.reviewText}"
-                    </p>
-                  </div>
-
-                  <div className="pt-4 border-t border-stone-700/60 mt-6 flex items-center justify-between">
-                    <div>
-                      <h4 className="font-bold text-white text-sm">{rev.name}</h4>
-                      <div className="flex items-center gap-1.5 text-xs text-amber-400 font-medium mt-0.5">
-                        <ShieldCheck className="w-3.5 h-3.5" />
-                        <span>Verified Community Member</span>
+          {featuredReviews.length > 0 ? (
+            <div>
+              <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 transition-all duration-500 ease-in-out ${isReviewAnimating ? 'opacity-0 scale-95' : 'opacity-100 scale-100'}`}>
+                {visibleReviews.map((rev) => (
+                  <div
+                    key={rev.id}
+                    className="bg-stone-800/90 border border-stone-700/80 rounded-2xl p-6 shadow-xl flex flex-col justify-between hover:border-saffron/50 transition-all group"
+                  >
+                    <div className="space-y-4">
+                      {/* Rating & Featured Tag */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1">
+                          {[1, 2, 3, 4, 5].map((s) => (
+                            <Star
+                              key={s}
+                              className={`w-4 h-4 ${
+                                s <= (rev.rating || 5)
+                                  ? 'text-amber-400 fill-amber-400'
+                                  : 'text-stone-600 fill-stone-700'
+                              }`}
+                            />
+                          ))}
+                        </div>
+                        <span className="text-[10px] font-bold text-amber-300/90 bg-amber-400/10 px-2 py-0.5 rounded-md border border-amber-400/20">
+                          Featured Review
+                        </span>
                       </div>
+
+                      {/* Review text */}
+                      <p className="text-stone-200 text-sm italic leading-relaxed">
+                        "{rev.reviewText}"
+                      </p>
                     </div>
-                    {rev.createdAt && (
-                      <span className="text-[11px] text-stone-400 font-mono">
-                        {new Date(rev.createdAt).toLocaleDateString('en-IN', {
-                          day: 'numeric',
-                          month: 'short',
-                          year: 'numeric'
-                        })}
-                      </span>
-                    )}
+
+                    <div className="pt-4 border-t border-stone-700/60 mt-6 flex items-center justify-between">
+                      <div>
+                        <h4 className="font-bold text-white text-sm">{rev.name}</h4>
+                        <div className="flex items-center gap-1.5 text-xs text-amber-400 font-medium mt-0.5">
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                          <span>Verified Community Member</span>
+                        </div>
+                      </div>
+                      {rev.createdAt && (
+                        <span className="text-[11px] text-stone-400 font-mono">
+                          {new Date(rev.createdAt).toLocaleDateString('en-IN', {
+                            day: 'numeric',
+                            month: 'short',
+                            year: 'numeric'
+                          })}
+                        </span>
+                      )}
+                    </div>
                   </div>
+                ))}
+              </div>
+
+              {/* Review Navigation & Pagination Controls */}
+              {reviewBatches.length > 1 && (
+                <div className="flex items-center justify-center gap-4 mt-8">
+                  <button
+                    onClick={handlePrevReviewBatch}
+                    className="p-2 rounded-full bg-stone-800 hover:bg-stone-700 border border-stone-700 text-stone-300 hover:text-white transition-all shadow-md active:scale-95"
+                    aria-label="Previous reviews"
+                  >
+                    <ChevronLeft className="w-5 h-5" />
+                  </button>
+
+                  <div className="flex items-center gap-2">
+                    {reviewBatches.map((_, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => {
+                          setIsReviewAnimating(true);
+                          setTimeout(() => {
+                            setReviewBatchIndex(idx);
+                            setIsReviewAnimating(false);
+                          }, 300);
+                        }}
+                        className={`h-2 rounded-full transition-all duration-300 ${
+                          idx === (reviewBatchIndex % reviewBatches.length)
+                            ? 'bg-amber-400 w-8'
+                            : 'bg-stone-700 hover:bg-stone-600 w-2'
+                        }`}
+                        aria-label={`Go to review batch ${idx + 1}`}
+                      />
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={handleNextReviewBatch}
+                    className="p-2 rounded-full bg-stone-800 hover:bg-stone-700 border border-stone-700 text-stone-300 hover:text-white transition-all shadow-md active:scale-95"
+                    aria-label="Next reviews"
+                  >
+                    <ChevronRight className="w-5 h-5" />
+                  </button>
                 </div>
-              ))}
+              )}
             </div>
           ) : (
             <div className="bg-stone-800/80 border border-stone-700 rounded-3xl p-8 max-w-xl mx-auto text-center space-y-4 shadow-xl">

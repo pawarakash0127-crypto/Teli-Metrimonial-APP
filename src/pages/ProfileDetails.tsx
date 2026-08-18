@@ -14,6 +14,8 @@ import {
   translateSiblingsList 
 } from '../lib/profileTranslator';
 import { getOrAssignProfileId, getDisplayProfileId } from '../lib/profileIdUtils';
+import { isSubscriptionActive } from '../lib/subscriptionService';
+import SubscriptionModal from '../components/SubscriptionModal';
 import GunaMatchingCard from '../components/GunaMatchingCard';
 
 export default function ProfileDetails() {
@@ -24,6 +26,12 @@ export default function ProfileDetails() {
   const [profile, setProfile] = useState<any>(null);
   const [myProfile, setMyProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [subModalOpen, setSubModalOpen] = useState(false);
+
+  const isOwner = profile ? (user?.uid === profile.uid || user?.uid === profile.id) : false;
+  const isAdmin = myProfile?.role === 'admin';
+  const isSubscribed = isSubscriptionActive(myProfile);
+  const canAccessContacts = isOwner || isAdmin || isSubscribed;
 
   const currentLang = i18n.language || 'en';
 
@@ -111,6 +119,33 @@ export default function ProfileDetails() {
         <button onClick={() => navigate('/search')} className="bg-saffron text-white font-bold px-6 py-2.5 rounded-xl text-sm shadow hover:bg-orange-600 transition-all flex items-center gap-2">
           <ArrowLeft className="w-4 h-4" /> {currentLang === 'mr' ? 'शोध पानावर जा' : 'Back to Search'}
         </button>
+      </div>
+    );
+  }
+
+  // Candidates without an active subscription are not visible to other non-owner non-admin members
+  const targetSubscribed = isSubscriptionActive(profile);
+  const isTargetVisible = isOwner || isAdmin || targetSubscribed;
+
+  if (!isTargetVisible) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-stone-50 p-4">
+        <div className="bg-white p-8 rounded-3xl shadow-xl border border-stone-200 max-w-md w-full text-center space-y-4">
+          <div className="w-16 h-16 bg-amber-100 text-amber-700 rounded-2xl flex items-center justify-center mx-auto">
+            <Lock className="w-8 h-8" />
+          </div>
+          <h2 className="text-xl font-serif font-bold text-stone-900">
+            {currentLang === 'mr' ? 'प्रोफाईल सध्या निष्क्रिय आहे' : 'Profile Currently Inactive'}
+          </h2>
+          <p className="text-stone-600 text-xs leading-relaxed">
+            {currentLang === 'mr'
+              ? 'हे प्रोफाईल सध्या कोणत्याही सक्रिय वार्षिक वर्गणीशी जोडलेले नाही. केवळ सक्रिय वर्गणीदार सदस्यांचीच प्रोफाईल्स वर-वधू शोधात दिसतात.'
+              : 'This candidate profile does not currently have an active annual subscription. Only profiles with an active membership plan are visible on Nashik Teli Samaj Matrimony.'}
+          </p>
+          <button onClick={() => navigate('/search')} className="w-full bg-saffron text-white font-bold py-3 rounded-xl text-xs shadow hover:bg-orange-600 transition-all flex items-center justify-center gap-2">
+            <ArrowLeft className="w-4 h-4" /> {currentLang === 'mr' ? 'शोधाकडे परत जा' : 'Back to Search Profiles'}
+          </button>
+        </div>
       </div>
     );
   }
@@ -582,44 +617,82 @@ export default function ProfileDetails() {
                 </div>
               )}
 
+              <SubscriptionModal
+                isOpen={subModalOpen}
+                onClose={() => setSubModalOpen(false)}
+                featureName={currentLang === 'mr' ? 'संपर्क क्रमांक व पत्ता' : 'Phone Number & Address'}
+              />
+
               {user && (profile.contactNumber || profile.address) && (
                 <div className="bg-white p-6 rounded-2xl border border-stone-100 shadow-sm hover:shadow-md transition-shadow">
-                  <h2 className="text-xl font-serif font-bold text-stone-900 border-b border-emerald-100 pb-3 mb-5 flex items-center gap-2">
-                    <Phone className="w-5 h-5 text-emerald-500" />
-                    {currentLang === 'mr' ? 'संपर्क माहिती' : 'Contact Details'}
+                  <h2 className="text-xl font-serif font-bold text-stone-900 border-b border-emerald-100 pb-3 mb-5 flex items-center justify-between">
+                    <span className="flex items-center gap-2">
+                      <Phone className="w-5 h-5 text-emerald-500" />
+                      {currentLang === 'mr' ? 'संपर्क माहिती' : 'Contact Details'}
+                    </span>
+                    {!canAccessContacts && (
+                      <span className="bg-amber-100 text-saffron text-xs font-bold px-2.5 py-1 rounded-full flex items-center gap-1">
+                        <Lock className="w-3 h-3" /> Membership Required
+                      </span>
+                    )}
                   </h2>
-                  <div className="bg-emerald-50/50 p-5 rounded-2xl border border-emerald-100/50 space-y-5">
-                    {profile.contactNumber && (
-                      <div className="flex items-center gap-4">
-                        <div className="p-3 bg-white rounded-xl shadow-sm border border-emerald-100">
-                          <Phone className="w-6 h-6 text-emerald-600" />
+
+                  {canAccessContacts ? (
+                    <div className="bg-emerald-50/50 p-5 rounded-2xl border border-emerald-100/50 space-y-5">
+                      {profile.contactNumber && (
+                        <div className="flex items-center gap-4">
+                          <div className="p-3 bg-white rounded-xl shadow-sm border border-emerald-100">
+                            <Phone className="w-6 h-6 text-emerald-600" />
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-emerald-600 uppercase font-bold tracking-wider">
+                              {currentLang === 'mr' ? 'मोबाईल नंबर' : 'Phone Number'}
+                            </p>
+                            <p className="text-emerald-900 font-bold text-xl">
+                              {profile.contactNumber.replace(/\D/g, '').length === 10 
+                                ? `+91 - ${profile.contactNumber.replace(/\D/g, '')}` 
+                                : profile.contactNumber}
+                            </p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-[10px] text-emerald-600 uppercase font-bold tracking-wider">
-                            {currentLang === 'mr' ? 'मोबाईल नंबर' : 'Phone Number'}
-                          </p>
-                          <p className="text-emerald-900 font-bold text-xl">
-                            {profile.contactNumber.replace(/\D/g, '').length === 10 
-                              ? `+91 - ${profile.contactNumber.replace(/\D/g, '')}` 
-                              : profile.contactNumber}
-                          </p>
+                      )}
+                      {profile.address && (
+                        <div className="flex items-start gap-4 pt-4 border-t border-emerald-100/50">
+                          <div className="p-3 bg-white rounded-xl shadow-sm border border-emerald-100 mt-1">
+                            <MapPin className="w-6 h-6 text-emerald-600" />
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-emerald-600 uppercase font-bold tracking-wider">
+                              {currentLang === 'mr' ? 'पत्ता' : 'Address'}
+                            </p>
+                            <p className="text-emerald-900 font-medium leading-relaxed">{translateText(profile.address, currentLang)}</p>
+                          </div>
                         </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="bg-gradient-to-br from-amber-50 to-orange-50 p-6 rounded-2xl border border-saffron/20 text-center space-y-4">
+                      <div className="w-12 h-12 bg-saffron/10 text-saffron rounded-full flex items-center justify-center mx-auto">
+                        <Lock className="w-6 h-6" />
                       </div>
-                    )}
-                    {profile.address && (
-                      <div className="flex items-start gap-4 pt-4 border-t border-emerald-100/50">
-                        <div className="p-3 bg-white rounded-xl shadow-sm border border-emerald-100 mt-1">
-                          <MapPin className="w-6 h-6 text-emerald-600" />
-                        </div>
-                        <div>
-                          <p className="text-[10px] text-emerald-600 uppercase font-bold tracking-wider">
-                            {currentLang === 'mr' ? 'पत्ता' : 'Address'}
-                          </p>
-                          <p className="text-emerald-900 font-medium leading-relaxed">{translateText(profile.address, currentLang)}</p>
-                        </div>
+                      <div>
+                        <h4 className="font-bold text-stone-900 text-base">
+                          {currentLang === 'mr' ? 'संपर्क क्रमांक सुरक्षित आहे' : 'Contact Details Locked'}
+                        </h4>
+                        <p className="text-xs text-stone-600 mt-1">
+                          {currentLang === 'mr'
+                            ? 'या उमेदवाराचा मोबाईल नंबर आणि घरचा पत्ता पाहण्यासाठी ₹७९९/वर्ष सदस्यत्व घ्या.'
+                            : 'Unlock candidate & parent contact numbers and home address with an Annual Matrimony Membership.'}
+                        </p>
                       </div>
-                    )}
-                  </div>
+                      <button
+                        onClick={() => setSubModalOpen(true)}
+                        className="w-full bg-saffron hover:bg-orange-600 text-white py-3 rounded-xl font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2"
+                      >
+                        <Lock className="w-4 h-4" /> Unlock Contact Details — ₹799/Year
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

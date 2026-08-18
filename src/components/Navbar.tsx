@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, User, LogIn, LogOut, Shield, Globe, Bell } from 'lucide-react';
+import { Search, User, LogIn, LogOut, Shield, Globe, Bell, Sparkles } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { signOut, auth, db, collection, query, where, onSnapshot } from '../lib/firebase';
 import { useTranslation } from 'react-i18next';
@@ -166,6 +166,25 @@ export default function Navbar() {
                     </span>
                   </div>
                 </div>
+
+                {/* Subscription / Membership Button */}
+                {profile?.role !== 'admin' && (
+                  <div className="relative group">
+                    <Link
+                      to="/subscription"
+                      className="p-2.5 sm:p-3 rounded-2xl text-amber-600 hover:text-saffron bg-amber-50/80 hover:bg-amber-100 transition-all border border-amber-200 shadow-sm active:scale-95 flex items-center justify-center"
+                      aria-label="Membership Plan"
+                    >
+                      <Sparkles className="h-5 w-5 fill-amber-400 text-amber-600" />
+                    </Link>
+                    <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 hidden group-hover:flex flex-col items-center z-50 pointer-events-none">
+                      <div className="w-2 h-2 bg-stone-900 rotate-45 -mb-1"></div>
+                      <span className="bg-stone-900 text-white text-xs font-semibold px-2.5 py-1 rounded-lg whitespace-nowrap shadow-lg">
+                        Membership Plan (₹799/Yr)
+                      </span>
+                    </div>
+                  </div>
+                )}
 
                 {/* Profile Button (only for regular users) */}
                 {profile?.role !== 'admin' && (

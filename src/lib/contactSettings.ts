@@ -17,12 +17,17 @@ export interface ContactUsSettings {
   pincode: string;
   googleMapsUrl?: string;
 
-  // Social Links
+  // Social Links & Visibility Toggles
   facebookUrl?: string;
+  showFacebook?: boolean;
   instagramUrl?: string;
+  showInstagram?: boolean;
   youtubeUrl?: string;
+  showYoutube?: boolean;
   linkedinUrl?: string;
+  showLinkedin?: boolean;
   twitterUrl?: string;
+  showTwitter?: boolean;
 
   // Additional Notice
   supportNotice?: string;
@@ -45,13 +50,62 @@ export const DEFAULT_CONTACT_SETTINGS: ContactUsSettings = {
   googleMapsUrl: 'https://maps.google.com/?q=Panchavati+Nashik+Maharashtra+422003',
 
   facebookUrl: '',
+  showFacebook: true,
   instagramUrl: '',
+  showInstagram: true,
   youtubeUrl: '',
+  showYoutube: true,
   linkedinUrl: '',
+  showLinkedin: true,
   twitterUrl: '',
+  showTwitter: true,
 
   supportNotice: 'Have questions regarding profile registration, verification, or community events? Send us a message or connect with our support team.'
 };
+
+/**
+ * Validates whether a given string is a well-formed http or https URL.
+ * Rejects javascript: URLs, empty strings, and malformed strings.
+ */
+export function isValidHttpUrl(urlString?: string): boolean {
+  if (!urlString || typeof urlString !== 'string') return false;
+  const trimmed = urlString.trim();
+  if (!trimmed) return false;
+  try {
+    const url = new URL(trimmed);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+export interface ActiveSocialPlatform {
+  name: string;
+  url: string;
+  platformKey: 'facebook' | 'instagram' | 'youtube' | 'linkedin' | 'twitter';
+}
+
+/**
+ * Returns strictly valid, enabled social media platforms.
+ * Hides any platform with empty URL, disabled toggle, or invalid URL scheme.
+ */
+export function getActiveSocialPlatforms(settings: ContactUsSettings): ActiveSocialPlatform[] {
+  const platforms: { name: string; url?: string; show?: boolean; platformKey: ActiveSocialPlatform['platformKey'] }[] = [
+    { name: 'Facebook', url: settings.facebookUrl, show: settings.showFacebook !== false, platformKey: 'facebook' },
+    { name: 'Instagram', url: settings.instagramUrl, show: settings.showInstagram !== false, platformKey: 'instagram' },
+    { name: 'YouTube', url: settings.youtubeUrl, show: settings.showYoutube !== false, platformKey: 'youtube' },
+    { name: 'LinkedIn', url: settings.linkedinUrl, show: settings.showLinkedin !== false, platformKey: 'linkedin' },
+    { name: 'Twitter / X', url: settings.twitterUrl, show: settings.showTwitter !== false, platformKey: 'twitter' },
+  ];
+
+  return platforms
+    .filter(p => p.show && isValidHttpUrl(p.url))
+    .map(p => ({
+      name: p.name,
+      url: (p.url || '').trim(),
+      platformKey: p.platformKey
+    }));
+}
 
 /**
  * Fetches Contact Us settings from Firestore (settings/contact_us).

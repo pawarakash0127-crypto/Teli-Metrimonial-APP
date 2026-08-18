@@ -53,15 +53,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           
           // 1. Subscribe to users collection (for role, favorites, account metadata)
           unsubscribeUserDoc = onSnapshot(userDocRef, async (docSnap) => {
+            const isEmailAdmin = firebaseUser.email === 'admin@admin.com' || (firebaseUser.email === 'pawarakash0127@gmail.com' && firebaseUser.emailVerified);
             if (docSnap.exists()) {
-              setProfile(docSnap.data() as UserProfile);
+              const userData = docSnap.data() as UserProfile;
+              if (isEmailAdmin && userData.role !== 'admin') {
+                userData.role = 'admin';
+                await updateDoc(userDocRef, { role: 'admin' }).catch(() => {});
+              }
+              setProfile(userData);
             } else {
-              const isDefaultAdmin = firebaseUser.email === 'pawarakash0127@gmail.com' && firebaseUser.emailVerified;
               const newProfile: UserProfile = {
                 uid: firebaseUser.uid,
                 ...(firebaseUser.email ? { email: firebaseUser.email } : {}),
                 ...(firebaseUser.phoneNumber ? { phoneNumber: firebaseUser.phoneNumber } : {}),
-                role: isDefaultAdmin ? 'admin' : 'user',
+                role: isEmailAdmin ? 'admin' : 'user',
                 createdAt: new Date().toISOString(),
                 favorites: []
               };

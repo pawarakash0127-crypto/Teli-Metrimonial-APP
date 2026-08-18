@@ -1,4 +1,21 @@
-import { db, doc, getDocs, collection, runTransaction, updateDoc, setDoc } from './firebase';
+import { db, doc, getDocs, collection, runTransaction, updateDoc, setDoc, getDoc } from './firebase';
+
+export function isUserAdminAccount(profileOrUser: any): boolean {
+  if (!profileOrUser) return false;
+  if (typeof profileOrUser === 'string') {
+    return profileOrUser.toLowerCase() === 'admin' || profileOrUser === 'pawarakash0127@gmail.com' || profileOrUser === 'admin@admin.com';
+  }
+  if (typeof profileOrUser === 'object') {
+    if (profileOrUser.role === 'admin' || profileOrUser.isAdmin === true || profileOrUser.isAdminProfile === true) {
+      return true;
+    }
+    const email = (profileOrUser.email || '').toLowerCase();
+    if (email === 'pawarakash0127@gmail.com' || email === 'admin@admin.com') {
+      return true;
+    }
+  }
+  return false;
+}
 
 export function getProfileIdPrefix(gender?: string): 'VADHU' | 'VAR' {
   const norm = (gender || '').trim().toLowerCase();
@@ -32,9 +49,15 @@ export function extractSequenceNumber(profileId?: string | number): number {
 /**
  * Formats a profile ID for UI display e.g., "VADU-001" or "VAR-002".
  * Accepts either a profile object or ID string + optional gender.
+ * For Administrator accounts, returns "ADMIN".
  */
 export function getDisplayProfileId(profileOrId: any, gender?: string): string {
-  if (!profileOrId) return 'VAR-001';
+  if (!profileOrId) return '';
+
+  // Check if target is an Admin account
+  if (isUserAdminAccount(profileOrId)) {
+    return 'ADMIN';
+  }
 
   let rawStr = '';
   let gen = gender;
@@ -50,6 +73,10 @@ export function getDisplayProfileId(profileOrId: any, gender?: string): string {
     rawStr = String(profileOrId);
   }
 
+  if (!rawStr || rawStr.trim() === '' || rawStr === 'undefined' || rawStr === 'null') {
+    return '';
+  }
+
   // If already formatted like VADHU-001, VADU-001 or VAR-002
   if (/^(VADHU|VADU|VAR)-\d+$/i.test(rawStr.trim())) {
     const parts = rawStr.trim().split('-');
@@ -60,6 +87,7 @@ export function getDisplayProfileId(profileOrId: any, gender?: string): string {
   }
 
   const seqNum = extractSequenceNumber(rawStr);
+  if (seqNum <= 0) return rawStr;
   const formattedNum = formatRawSequence(seqNum);
   const prefix = getProfileIdPrefix(gen);
 
@@ -68,10 +96,14 @@ export function getDisplayProfileId(profileOrId: any, gender?: string): string {
 
 /**
  * Atomically generates the next global sequence Profile ID using a Firestore transaction.
- * Prepend category prefix: VADU- or VAR- based on gender.
- * Returns formatted ID e.g. "VADU-001", "VAR-002", "VADU-003".
+ * Prepend category prefix: VADHU- or VAR- based on gender.
+ * Admin users are exempt and return an empty string without consuming a sequence counter.
  */
-export async function assignGlobalProfileIdInTransaction(gender?: string): Promise<string> {
+export async function assignGlobalProfileIdInTransaction(gender?: string, isUserAdmin?: boolean): Promise<string> {
+  if (isUserAdmin) {
+    return '';
+  }
+
   const counterRef = doc(db, 'counters', 'profile_counter');
   const userIdCounterRef = doc(db, 'counters', 'userId');
 
@@ -107,13 +139,12 @@ export async function assignGlobalProfileIdInTransaction(gender?: string): Promi
 }
 
 /**
- * Runs a complete Firestore migration across ALL user profile documents in Firestore:
- * 1. Fetches all documents from 'profiles' collection.
- * 2. Sorts profiles deterministically by createdAt ascending, then uid.
- * 3. Assigns a single global sequential ID across all users (001, 002, 003...).
- * 4. Ensures no duplicate numeric values exist anywhere.
- * 5. Updates profileId and vaduVarNumber permanently in Firestore for each profile.
- * 6. Sets global counter 'counters/profile_counter' (currentSeq & lastNumber) to the highest assigned number.
+ * SAFE, IDEMPOTENT ID ASSIGNMENT:
+ * 1. Inspects all existing profile documents.
+ * 2. EXCLUDES all admin accounts (admins NEVER receive a VAR/VADHU ID).
+ * 3. PRESERVES all existing valid profile IDs (NEVER reorders, renumbers, or overwrites existing users).
+ * 4. Only assigns new sequential IDs to legitimate non-admin profiles that genuinely have NO ID.
+ * 5. Safely syncs the global counter to Math.max(existingCounter, maxAssignedSeq).
  */
 export async function runCompleteProfileIdMigration(): Promise<{
   totalCount: number;
@@ -126,51 +157,78 @@ export async function runCompleteProfileIdMigration(): Promise<{
     allProfiles.push({ ...d.data(), uid: d.id });
   });
 
-  // Sort deterministically
-  allProfiles.sort((a, b) => {
-    const timeA = new Date(a.createdAt || 0).getTime();
-    const timeB = new Date(b.createdAt || 0).getTime();
-    if (timeA !== timeB) return timeA - timeB;
-    return (a.uid || '').localeCompare(b.uid || '');
-  });
+  let maxAssignedSeq = 0;
+  const unassignedProfiles: any[] = [];
 
-  let updatedCount = 0;
-  let lastAssignedId = 'VAR-000';
+  for (const p of allProfiles) {
+    if (isUserAdminAccount(p)) {
+      continue; // Skip admins completely
+    }
 
-  for (let i = 0; i < allProfiles.length; i++) {
-    const p = allProfiles[i];
-    const seq = i + 1;
-    const seqStr = formatRawSequence(seq);
-    const prefix = getProfileIdPrefix(p.gender);
-    const expectedId = `${prefix}-${seqStr}`;
-
-    lastAssignedId = expectedId;
-
-    if (p.profileId !== expectedId || p.vaduVarNumber !== expectedId || p.numericSeq !== seq) {
-      const profileRef = doc(db, 'profiles', p.uid);
-      const userRef = doc(db, 'users', p.uid);
-
-      await updateDoc(profileRef, {
-        profileId: expectedId,
-        vaduVarNumber: expectedId,
-        numericSeq: seq,
-        updatedAt: new Date().toISOString()
-      }).catch((err) => console.error(`Error updating profile ${p.uid}:`, err));
-
-      await updateDoc(userRef, {
-        profileId: expectedId,
-        vaduVarNumber: expectedId
-      }).catch(() => {}); // user doc might not exist
-
-      p.profileId = expectedId;
-      p.vaduVarNumber = expectedId;
-      p.numericSeq = seq;
-      updatedCount++;
+    const currentId = p.profileId || p.vaduVarNumber || '';
+    if (currentId && /^(VADHU|VADU|VAR)-\d+$/i.test(String(currentId).trim())) {
+      const seq = extractSequenceNumber(currentId);
+      if (seq > maxAssignedSeq) {
+        maxAssignedSeq = seq;
+      }
+    } else {
+      unassignedProfiles.push(p);
     }
   }
 
-  const finalSeq = allProfiles.length;
-  // Update global counter in Firestore
+  // Get current sequence counter to ensure we never back-track
+  let currentCounterSeq = 0;
+  try {
+    const counterSnap = await getDoc(doc(db, 'counters', 'profile_counter'));
+    if (counterSnap.exists()) {
+      currentCounterSeq = counterSnap.data().lastNumber || counterSnap.data().currentSeq || 0;
+    }
+  } catch (err) {
+    console.warn("Could not read profile_counter:", err);
+  }
+
+  let runningSeq = Math.max(maxAssignedSeq, currentCounterSeq);
+  let updatedCount = 0;
+  let lastAssignedId = maxAssignedSeq > 0 ? `VAR-${formatRawSequence(maxAssignedSeq)}` : 'VAR-000';
+
+  // Sort unassigned profiles by createdAt ascending so older unassigned profiles get earlier free IDs
+  unassignedProfiles.sort((a, b) => {
+    const timeA = new Date(a.createdAt || 0).getTime();
+    const timeB = new Date(b.createdAt || 0).getTime();
+    return timeA - timeB;
+  });
+
+  for (const p of unassignedProfiles) {
+    runningSeq += 1;
+    const seqStr = formatRawSequence(runningSeq);
+    const prefix = getProfileIdPrefix(p.gender);
+    const newId = `${prefix}-${seqStr}`;
+
+    lastAssignedId = newId;
+
+    const profileRef = doc(db, 'profiles', p.uid);
+    const userRef = doc(db, 'users', p.uid);
+
+    await updateDoc(profileRef, {
+      profileId: newId,
+      vaduVarNumber: newId,
+      numericSeq: runningSeq,
+      updatedAt: new Date().toISOString()
+    }).catch((err) => console.error(`Error updating profile ${p.uid}:`, err));
+
+    await updateDoc(userRef, {
+      profileId: newId,
+      vaduVarNumber: newId
+    }).catch(() => {});
+
+    p.profileId = newId;
+    p.vaduVarNumber = newId;
+    p.numericSeq = runningSeq;
+    updatedCount++;
+  }
+
+  // Update global counter in Firestore if new IDs were assigned or counter needs advancement
+  const finalSeq = runningSeq;
   const counterPayload = {
     currentSeq: finalSeq,
     lastNumber: finalSeq,
@@ -190,7 +248,7 @@ export async function runCompleteProfileIdMigration(): Promise<{
  * Synchronous helper for legacy or temporary objects.
  */
 export function getOrAssignProfileId(profile: any, allProfiles: any[] = []): string {
-  if (!profile) return 'VAR-001';
+  if (!profile) return '';
   return getDisplayProfileId(profile);
 }
 

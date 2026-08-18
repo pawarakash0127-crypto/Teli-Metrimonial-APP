@@ -57,15 +57,28 @@ export function normalizeString(str?: string): string {
   return str.toLowerCase().trim().replace(/\s+/g, ' ');
 }
 
+export function isAnyPreference(pref: string | string[] | undefined): boolean {
+  if (!pref) return false;
+  if (Array.isArray(pref)) {
+    return pref.some(p => {
+      const norm = normalizeString(p);
+      return norm === 'any' || norm === 'all' || norm === 'any education' || norm === 'any location';
+    });
+  }
+  const norm = normalizeString(pref);
+  return norm === 'any' || norm === 'all' || norm === 'any education' || norm === 'any location';
+}
+
 export function parsePreferenceTokens(pref: string | string[] | undefined): string[] {
   if (!pref) return [];
+  if (isAnyPreference(pref)) return [];
   if (Array.isArray(pref)) {
-    return pref.map(normalizeString).filter(s => s && s !== 'any');
+    return pref.map(normalizeString).filter(s => s && s !== 'any' && s !== 'all');
   }
   return pref
     .split(/[,/|]/)
     .map(s => normalizeString(s))
-    .filter(s => s && s !== 'any');
+    .filter(s => s && s !== 'any' && s !== 'all');
 }
 
 export function matchesAnyToken(prefTokens: string[], candidateText?: string): boolean {
@@ -194,8 +207,14 @@ export function calculateMatchScore(
 
   // Education = 40 points
   let educationMatched = false;
+  const isEduAny = isAnyPreference(prefs.education);
   const eduTokens = parsePreferenceTokens(prefs.education);
-  if (eduTokens.length > 0) {
+  if (isEduAny) {
+    maxPoints += 40;
+    earnedPoints += 40;
+    educationMatched = true;
+    reasons.push(`✓ Education: Any (Matches all education qualifications)`);
+  } else if (eduTokens.length > 0) {
     maxPoints += 40;
     const candEdu = [candidate.highestEducation, candidate.degreeDetails, candidate.customEducation, candidate.education]
       .filter(Boolean)
@@ -212,8 +231,14 @@ export function calculateMatchScore(
 
   // Location = 30 points
   let locationMatched = false;
+  const isLocAny = isAnyPreference(prefs.location);
   const locTokens = parsePreferenceTokens(prefs.location);
-  if (locTokens.length > 0) {
+  if (isLocAny) {
+    maxPoints += 30;
+    earnedPoints += 30;
+    locationMatched = true;
+    reasons.push(`✓ Location: Any (Matches all locations)`);
+  } else if (locTokens.length > 0) {
     maxPoints += 30;
     const candLoc = [candidate.location, candidate.nativePlace, candidate.parentsHometown, candidate.address]
       .filter(Boolean)

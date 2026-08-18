@@ -13,9 +13,13 @@ import Admin from './pages/Admin';
 import FAQ from './pages/FAQ';
 import AboutUs from './pages/AboutUs';
 import ContactUs from './pages/ContactUs';
+import Subscription from './pages/Subscription';
+import RequireMembership from './components/RequireMembership';
+import FloatingMembershipNotification from './components/FloatingMembershipNotification';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import logoImg from './assets/images/LOGO.jpg';
-import { subscribeContactSettings, DEFAULT_CONTACT_SETTINGS, ContactUsSettings } from './lib/contactSettings';
+import { subscribeContactSettings, DEFAULT_CONTACT_SETTINGS, ContactUsSettings, getActiveSocialPlatforms } from './lib/contactSettings';
+import { Facebook, Instagram, Youtube, Linkedin, Twitter } from 'lucide-react';
 
 /**
  * Route guard that ensures logged in users complete mandatory profile fields
@@ -70,7 +74,9 @@ export default function App() {
                 path="/search" 
                 element={
                   <RequireCompleteProfile>
-                    <Search />
+                    <RequireMembership>
+                      <Search />
+                    </RequireMembership>
                   </RequireCompleteProfile>
                 } 
               />
@@ -79,7 +85,9 @@ export default function App() {
                 path="/profile/:id" 
                 element={
                   <RequireCompleteProfile>
-                    <ProfileDetails />
+                    <RequireMembership>
+                      <ProfileDetails />
+                    </RequireMembership>
                   </RequireCompleteProfile>
                 } 
               />
@@ -87,7 +95,9 @@ export default function App() {
                 path="/notifications" 
                 element={
                   <RequireCompleteProfile>
-                    <Notifications />
+                    <RequireMembership>
+                      <Notifications />
+                    </RequireMembership>
                   </RequireCompleteProfile>
                 } 
               />
@@ -95,11 +105,13 @@ export default function App() {
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
               <Route path="/admin" element={<Admin />} />
+              <Route path="/subscription" element={<Subscription />} />
               <Route path="/faq" element={<FAQ />} />
               <Route path="/about" element={<AboutUs />} />
               <Route path="/contact" element={<ContactUs />} />
             </Routes>
           </main>
+          <FloatingMembershipNotification />
 
           {/* Enhanced Footer */}
           <footer className="bg-maroon text-gold/80 py-12 border-t-4 border-gold/20">
@@ -121,6 +133,38 @@ export default function App() {
                   <p className="text-xs text-stone-300 leading-relaxed max-w-xs mx-auto md:mx-0">
                     नाशिक जिल्हा तेली समाज संचलित स्नेह बंधन विवाह मंडळ. 100% Verified profiles for our community.
                   </p>
+                  {/* Social Links */}
+                  {(() => {
+                    const iconMap = {
+                      facebook: Facebook,
+                      instagram: Instagram,
+                      youtube: Youtube,
+                      linkedin: Linkedin,
+                      twitter: Twitter
+                    };
+                    const activeSocials = getActiveSocialPlatforms(contactInfo);
+                    if (activeSocials.length === 0) return null;
+
+                    return (
+                      <div className="flex items-center justify-center md:justify-start gap-2.5 pt-2">
+                        {activeSocials.map(s => {
+                          const IconComp = iconMap[s.platformKey];
+                          return (
+                            <a
+                              key={s.name}
+                              href={s.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-1.5 rounded-full bg-white/10 hover:bg-gold hover:text-maroon text-gold transition-all duration-200"
+                              title={s.name}
+                            >
+                              <IconComp className="w-4 h-4" />
+                            </a>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Quick Links */}

@@ -86,6 +86,53 @@ export interface ProfileData {
   createdAt?: string;
   updatedAt?: string;
   age?: number;
+
+  // Subscription & Payment Fields
+  varVadhuId?: string;
+  vaduVarNumber?: string;
+  subscriptionPlan?: 'annual' | string | null;
+  subscriptionStatus?: 'active' | 'inactive' | 'expired' | 'pending' | 'failed' | 'cancelled';
+  paymentStatus?: 'paid' | 'not_paid' | 'pending' | 'failed' | 'refunded';
+  amount?: number;
+  currency?: string;
+  startDate?: string | null;
+  endDate?: string | null;
+  paymentProvider?: string | null;
+  paymentTransactionId?: string | null;
+  orderId?: string | null;
+  paymentDate?: string | null;
+  renewalDate?: string | null;
+  cancellationDate?: string | null;
+  autoRenew?: boolean;
+  subscriptionSource?: string | null;
+  isTestSubscriber?: boolean;
+}
+
+export type SubscriptionPlanType = 'annual';
+export type SubscriptionStatusType = 'active' | 'inactive' | 'expired' | 'pending' | 'failed' | 'cancelled';
+export type PaymentStatusType = 'paid' | 'not_paid' | 'pending' | 'failed' | 'refunded';
+
+export interface SubscriptionData {
+  uid: string;
+  varVadhuId: string;
+  subscriptionPlan: SubscriptionPlanType | string | null;
+  subscriptionStatus: SubscriptionStatusType;
+  paymentStatus: PaymentStatusType;
+  amount: number;
+  currency: string;
+  startDate: string | null;
+  endDate: string | null;
+  createdAt: string;
+  updatedAt: string;
+  paymentProvider: string | null;
+  paymentTransactionId: string | null;
+  orderId: string | null;
+  paymentDate: string | null;
+  renewalDate: string | null;
+  cancellationDate: string | null;
+  autoRenew: boolean;
+  subscriptionSource: string | null;
+  isTestSubscriber?: boolean;
 }
 
 export const TITLE_PREFIXES = [

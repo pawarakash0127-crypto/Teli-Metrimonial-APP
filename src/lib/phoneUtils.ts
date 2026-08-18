@@ -4,32 +4,56 @@ export interface PhoneValidationResult {
   isValid: boolean;
   formatted: string;
   raw10: string;
+  e164: string;
   error?: string;
 }
 
-export function validateAndFormatPhone(phoneStr: string): PhoneValidationResult {
+/**
+ * Normalizes any Indian phone number input into standardized raw10 and E.164 (+91XXXXXXXXXX) format.
+ * Works seamlessly with +91 8149909817, +918149901817, 8149909817, 08149909817, etc.
+ */
+export function normalizePhone(phoneStr: string): { raw10: string; e164: string; formatted: string; isValid: boolean } {
   if (!phoneStr || !phoneStr.trim()) {
+    return { raw10: '', e164: '', formatted: '', isValid: false };
+  }
+
+  const digits = phoneStr.replace(/[^\d]/g, '');
+  if (digits.length >= 10) {
+    const raw10 = digits.slice(-10);
     return {
-      isValid: false,
-      formatted: '',
-      raw10: '',
-      error: 'Contact number is required.'
+      raw10,
+      e164: `+91${raw10}`,
+      formatted: `+91 ${raw10}`,
+      isValid: true
     };
   }
 
-  // Extract digits only
-  const digits = phoneStr.replace(/[^\d]/g, '');
+  return { raw10: '', e164: '', formatted: phoneStr, isValid: false };
+}
 
-  let raw10 = '';
-  if (digits.length >= 10) {
-    raw10 = digits.slice(-10);
-  }
+export function getPhoneVariants(phoneInput: string): string[] {
+  const norm = normalizePhone(phoneInput);
+  if (!norm.isValid) return [phoneInput];
+  const { raw10 } = norm;
 
-  if (raw10.length === 10) {
+  return Array.from(new Set([
+    raw10,
+    `+91${raw10}`,
+    `+91 ${raw10}`,
+    `+91-${raw10}`,
+    `0${raw10}`,
+    `91${raw10}`
+  ]));
+}
+
+export function validateAndFormatPhone(phoneStr: string): PhoneValidationResult {
+  const norm = normalizePhone(phoneStr);
+  if (norm.isValid) {
     return {
       isValid: true,
-      formatted: `+91 ${raw10}`,
-      raw10: raw10
+      formatted: norm.formatted,
+      raw10: norm.raw10,
+      e164: norm.e164
     };
   }
 
@@ -37,6 +61,7 @@ export function validateAndFormatPhone(phoneStr: string): PhoneValidationResult 
     isValid: false,
     formatted: phoneStr,
     raw10: '',
+    e164: '',
     error: 'Contact number must be a valid 10-digit mobile number.'
   };
 }
@@ -53,18 +78,10 @@ export function validateEmail(emailStr: string): { isValid: boolean; error?: str
 }
 
 export async function findAccountByPhone(phoneInput: string): Promise<any | null> {
-  const digits = phoneInput.replace(/[^\d]/g, '');
-  if (digits.length < 10) return null;
-  const raw10 = digits.slice(-10);
-
-  const phoneVariants = [
-    raw10,
-    `+91${raw10}`,
-    `+91 ${raw10}`,
-    `+91-${raw10}`,
-    `0${raw10}`,
-    `91${raw10}`
-  ];
+  const norm = normalizePhone(phoneInput);
+  if (!norm.isValid) return null;
+  const raw10 = norm.raw10;
+  const phoneVariants = getPhoneVariants(phoneInput);
 
   // 1. Query profiles collection by contactNumber
   try {
@@ -153,5 +170,8 @@ export const MANDATORY_PROFILE_FIELDS = [
   { key: 'nativePlace', label: 'Native Place' },
   { key: 'gotraKul', label: 'Gotra / Kul' },
   { key: 'maritalStatus', label: 'Marital Status' },
-  { key: 'contactNumber', label: 'Contact Number' }
+  { key: 'contactNumber', label: 'Contact Number' },
+  { key: 'address', label: 'Address' },
+  { key: 'parentsContact', label: "Parents' Contact" },
+  { key: 'partnerExpectations', label: 'Partner Expectations' }
 ] as const;

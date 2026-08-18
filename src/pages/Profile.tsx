@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { db, doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs, onSnapshot } from '../lib/firebase';
 import { useNavigate, useParams, Link, useLocation } from 'react-router-dom';
-import { Upload, X, MapPin, Briefcase, GraduationCap, Users, Phone, User, Heart, CheckCircle, ShieldCheck, AlertCircle, KeyRound, Calendar, Trash2, RefreshCw, Mail, Lock } from 'lucide-react';
+import { Upload, X, MapPin, Briefcase, GraduationCap, Users, Phone, User, Heart, CheckCircle, ShieldCheck, AlertCircle, KeyRound, Calendar, Trash2, RefreshCw, Mail, Lock, Sparkles, CreditCard, Zap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import ImageCarousel from '../components/ImageCarousel';
 import { validateAndFormatPhone, MANDATORY_PROFILE_FIELDS } from '../lib/phoneUtils';
@@ -17,6 +17,7 @@ import { HIGHEST_EDUCATION_CATEGORIES, ANNUAL_INCOME_OPTIONS, TITLE_PREFIXES } f
 import { capitalizeWords } from '../lib/capitalizationUtils';
 import { getDisplayProfileId } from '../lib/profileIdUtils';
 import { formatHeightDisplay, formatHeightInput, translateText } from '../lib/profileTranslator';
+import { getSubscriptionDetails, activateSubscriptionInFirestore, deactivateSubscriptionInFirestore, ANNUAL_SUBSCRIPTION_PRICE } from '../lib/subscriptionService';
 
 const FavoritesList = ({ favoriteIds }: { favoriteIds: string[] }) => {
   const [favorites, setFavorites] = useState<any[]>([]);
@@ -583,12 +584,14 @@ export default function Profile() {
           return digits;
         };
 
+        const authPhone = user.phoneNumber || (user as any).phone || (authProfile as any)?.phoneNumber || (authProfile as any)?.contactNumber || '';
+
         setFormData(prev => ({
           ...prev,
           ...data,
           email: data.email || user.email || '',
-          contactNumber: extract10Digits(data.contactNumber),
-          parentsContact: extract10Digits(data.parentsContact),
+          contactNumber: extract10Digits(data.contactNumber || authPhone),
+          parentsContact: extract10Digits(data.parentsContact || authPhone),
           maternalUnclePhone: extract10Digits(data.maternalUnclePhone),
           gotraKul: data.gotraKul || data.gotra || '',
           partnerPreferences: {
@@ -884,8 +887,9 @@ export default function Profile() {
         }
       }
 
-      // 2. Strict Phone Validation
-      const phoneResult = validateAndFormatPhone(formData.contactNumber);
+      // 2. Strict Phone Validation for Contact Number (auto-fallback to user's registered phone)
+      const contactPhoneInput = formData.contactNumber || user?.phoneNumber || (user as any)?.phone || (authProfile as any)?.phoneNumber || '';
+      const phoneResult = validateAndFormatPhone(contactPhoneInput);
       if (!phoneResult.isValid) {
         const errMsg = `Contact Number error: ${phoneResult.error || 'Must be a valid 10-digit mobile number.'}`;
         setMessage({ type: 'error', text: errMsg });
@@ -894,17 +898,36 @@ export default function Profile() {
         return;
       }
 
-      let formattedParentsContact = '';
-      if (formData.parentsContact && formData.parentsContact.trim()) {
-        const pcDigits = formData.parentsContact.replace(/[^\d]/g, '');
-        if (pcDigits.length >= 10) {
-          formattedParentsContact = `+91 ${pcDigits.slice(-10)}`;
-        } else if (pcDigits.length > 0) {
-          setMessage({ type: 'error', text: "Parents' contact number must be a valid 10-digit mobile number." });
-          setSaving(false);
-          focusAndHighlightElement('parentsContact');
-          return;
-        }
+      // 3. Strict Validation for Mandatory Parents Contact
+      if (!formData.parentsContact || !formData.parentsContact.trim()) {
+        setMessage({ type: 'error', text: "Please enter Parents' Contact Number (Required)." });
+        setSaving(false);
+        focusAndHighlightElement('parentsContact');
+        return;
+      }
+      const parentsPhoneResult = validateAndFormatPhone(formData.parentsContact);
+      if (!parentsPhoneResult.isValid) {
+        setMessage({ type: 'error', text: `Parents' Contact error: ${parentsPhoneResult.error || "Parents' contact number must be a valid 10-digit mobile number."}` });
+        setSaving(false);
+        focusAndHighlightElement('parentsContact');
+        return;
+      }
+      const formattedParentsContact = parentsPhoneResult.formatted;
+
+      // 4. Strict Validation for Address
+      if (!formData.address || !formData.address.trim()) {
+        setMessage({ type: 'error', text: "Please enter Address (Required)." });
+        setSaving(false);
+        focusAndHighlightElement('address');
+        return;
+      }
+
+      // 5. Strict Validation for Partner Expectations
+      if (!formData.partnerExpectations || !formData.partnerExpectations.trim()) {
+        setMessage({ type: 'error', text: "Please describe your Partner Expectations (Required)." });
+        setSaving(false);
+        focusAndHighlightElement('partnerExpectations');
+        return;
       }
 
       let formattedUnclePhone = '';
@@ -986,6 +1009,9 @@ export default function Profile() {
       });
       setMessage({ type: 'success', text: isAdminEditing ? 'Profile updated successfully!' : 'Profile saved successfully!' });
       
+      // Re-enable floating membership notification if not already subscribed
+      sessionStorage.removeItem('nashik_membership_prompt_dismissed');
+
       setIsEditing(false);
       
       const totalPhotosUploaded = (profileData.photoUrl ? 1 : 0) + (profileData.additionalPhotos ? profileData.additionalPhotos.length : 0);
@@ -1390,6 +1416,154 @@ export default function Profile() {
               </span>
             </div>
           </div>
+
+          {/* Dedicated Membership & Subscription Section */}
+          {(() => {
+            const subInfo = getSubscriptionDetails(formData);
+            const isSelfOrAdmin = targetUid === user?.uid || authProfile?.role === 'admin';
+
+            return (
+              <div className="mt-8 pt-6 border-t border-stone-200 space-y-6">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-3 bg-amber-100 text-saffron rounded-2xl border border-amber-300">
+                      <Sparkles className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h4 className="text-xl font-serif font-bold text-stone-900">
+                        Membership & Subscription Details
+                      </h4>
+                      <p className="text-xs text-stone-500">
+                        Official Nashik Teli Samaj Matrimony Annual Subscription Status
+                      </p>
+                    </div>
+                  </div>
+
+                  <span className={`px-4 py-1.5 rounded-full text-xs font-bold border flex items-center gap-1.5 ${subInfo.badgeColor}`}>
+                    <ShieldCheck className="w-4 h-4" />
+                    {subInfo.label}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-5 text-sm">
+                  <div className="p-4 bg-stone-50 rounded-2xl border border-stone-100 space-y-1">
+                    <span className="text-stone-400 font-bold text-[11px] uppercase block">Subscription Plan</span>
+                    <span className="font-bold text-stone-900 block text-base">Annual Matrimony Plan</span>
+                    <span className="text-xs text-saffron font-bold">₹{ANNUAL_SUBSCRIPTION_PRICE} / Year</span>
+                  </div>
+
+                  <div className="p-4 bg-stone-50 rounded-2xl border border-stone-100 space-y-1">
+                    <span className="text-stone-400 font-bold text-[11px] uppercase block">Start Date</span>
+                    <span className="font-bold text-stone-900 block">{subInfo.startDate || 'Not Subscribed'}</span>
+                  </div>
+
+                  <div className="p-4 bg-stone-50 rounded-2xl border border-stone-100 space-y-1">
+                    <span className="text-stone-400 font-bold text-[11px] uppercase block">Expiry Date</span>
+                    <span className="font-bold text-stone-900 block">{subInfo.endDate || 'Not Subscribed'}</span>
+                  </div>
+
+                  <div className="p-4 bg-stone-50 rounded-2xl border border-stone-100 space-y-1">
+                    <span className="text-stone-400 font-bold text-[11px] uppercase block">Days Remaining</span>
+                    <span className={`font-bold block ${subInfo.isActive ? 'text-emerald-700' : 'text-stone-500'}`}>
+                      {subInfo.isActive ? `${subInfo.daysRemaining} Days` : 'Expired / Inactive'}
+                    </span>
+                  </div>
+
+                  <div className="p-4 bg-stone-50 rounded-2xl border border-stone-100 space-y-1">
+                    <span className="text-stone-400 font-bold text-[11px] uppercase block">Payment Status</span>
+                    <span className={`font-bold uppercase text-xs px-2.5 py-0.5 rounded-md inline-block ${
+                      formData.paymentStatus === 'paid' ? 'bg-emerald-100 text-emerald-800' : 'bg-stone-200 text-stone-700'
+                    }`}>
+                      {formData.paymentStatus || (subInfo.isActive ? 'Paid' : 'Unpaid')}
+                    </span>
+                  </div>
+
+                  <div className="p-4 bg-stone-50 rounded-2xl border border-stone-100 space-y-1">
+                    <span className="text-stone-400 font-bold text-[11px] uppercase block">Transaction / Order ID</span>
+                    <span className="font-mono text-xs font-bold text-stone-700 truncate block">
+                      {formData.paymentId || formData.razorpayOrderId || 'N/A'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Member / Admin Actions */}
+                <div className="flex flex-wrap items-center justify-between gap-4 pt-4 border-t border-stone-100">
+                  <p className="text-xs text-stone-500 max-w-md">
+                    An active membership unlocks direct family mobile numbers, WhatsApp contact options, and priority match proposals across the portal.
+                  </p>
+
+                  <div className="flex items-center gap-3">
+                    <Link
+                      to="/subscription"
+                      className="px-5 py-2.5 bg-saffron hover:bg-orange-600 text-white font-bold rounded-xl text-xs transition-all shadow-md flex items-center gap-2"
+                    >
+                      <Zap className="w-4 h-4" />
+                      {subInfo.isActive ? 'Renew / View Subscription' : 'Upgrade / Subscribe Now (₹799)'}
+                    </Link>
+
+                    {/* Admin Manual Override Controls */}
+                    {authProfile?.role === 'admin' && (
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              setSaving(true);
+                              await activateSubscriptionInFirestore(
+                                targetUid,
+                                {
+                                  success: true,
+                                  transactionId: `ADMIN_GRANT_${Date.now()}`,
+                                  orderId: `ADMIN_ORD_${Date.now()}`,
+                                  amount: 799,
+                                  currency: 'INR',
+                                  provider: 'admin_manual',
+                                  paymentDate: new Date().toISOString(),
+                                  message: 'Manually granted by Administrator'
+                                },
+                                'admin',
+                                (formData as any).vaduVarNumber || formData.profileId
+                              );
+                              setToast({ type: 'success', text: '1-Year Subscription manually granted to member!' });
+                            } catch (err: any) {
+                              setToast({ type: 'error', text: err.message || 'Failed to grant subscription.' });
+                            } finally {
+                              setSaving(false);
+                            }
+                          }}
+                          disabled={saving}
+                          className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-all shadow-sm"
+                        >
+                          {subInfo.isActive ? 'Extend 1 Year (Admin)' : 'Grant Subscription (Admin)'}
+                        </button>
+
+                        {subInfo.isActive && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                setSaving(true);
+                                await deactivateSubscriptionInFirestore(targetUid, 'Cancelled by Administrator');
+                                setToast({ type: 'success', text: 'Subscription revoked by Administrator.' });
+                              } catch (err: any) {
+                                setToast({ type: 'error', text: err.message || 'Failed to revoke subscription.' });
+                              } finally {
+                                setSaving(false);
+                              }
+                            }}
+                            disabled={saving}
+                            className="px-4 py-2.5 bg-red-100 hover:bg-red-200 text-red-700 text-xs font-bold rounded-xl transition-all border border-red-200"
+                          >
+                            Revoke Membership
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -1722,18 +1896,16 @@ export default function Profile() {
               <input type="text" name="companyName" placeholder="e.g., Google" value={formData.companyName} onChange={handleChange} className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 border transition-all" />
             </div>
             <div>
-              <label className="block text-sm font-bold text-stone-700 mb-1">Annual Income (Optional)</label>
-              <select 
+              <label className="block text-sm font-bold text-stone-700 mb-1">Annual Income</label>
+              <input 
+                type="text" 
                 name="income" 
+                placeholder="e.g., ₹6 - 8 Lakhs / year, 12 LPA, 50,000 / month" 
                 value={formData.income || ''} 
                 onChange={handleChange} 
-                className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 border bg-white transition-all font-medium"
-              >
-                <option value="">-- Select Annual Income (Optional) --</option>
-                {ANNUAL_INCOME_OPTIONS.map(inc => (
-                  <option key={inc} value={inc}>{inc}</option>
-                ))}
-              </select>
+                className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 border transition-all font-medium" 
+              />
+              <p className="text-[11px] text-stone-400 mt-1">Enter free text or package (e.g. 6-8 LPA, ₹5,00,000/yr)</p>
             </div>
           </div>
         </div>
@@ -1824,8 +1996,20 @@ export default function Profile() {
               <input type="text" name="fatherOccupationCompany" placeholder="e.g. Business / Government Service" value={(formData as any).fatherOccupationCompany || formData.parentsOccupation || ''} onChange={handleChange} className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 border transition-all" />
             </div>
             <div>
-              <label className="block text-sm font-bold text-stone-700 mb-1">Parents' Contact Details</label>
-              <input type="text" name="parentsContact" value={formData.parentsContact} onChange={handleChange} className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 border transition-all" />
+              <label className="block text-sm font-bold text-stone-700 mb-1">Parents' Contact Details *</label>
+              <div className="relative flex items-center">
+                <span className="absolute left-3 font-bold text-stone-500 text-sm bg-stone-100 px-2 py-1 rounded-md border border-stone-200">+91</span>
+                <input 
+                  required 
+                  type="tel" 
+                  name="parentsContact" 
+                  value={formData.parentsContact} 
+                  onChange={handleChange} 
+                  className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 pl-16 border transition-all" 
+                  placeholder="9876543210 (10 digits)" 
+                />
+              </div>
+              <p className="text-[11px] text-stone-400 mt-1">10-digit mobile number for family communication.</p>
             </div>
           </div>
           
@@ -1924,8 +2108,17 @@ export default function Profile() {
             </div>
           </div>
           <div>
-            <label className="block text-sm font-bold text-stone-700 mb-1">Address</label>
-            <textarea name="address" rows={2} value={formData.address} onChange={handleChange} className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 border transition-all" placeholder="Complete address"></textarea>
+            <label className="block text-sm font-bold text-stone-700 mb-1">Address *</label>
+            <textarea 
+              required 
+              name="address" 
+              rows={2} 
+              value={formData.address} 
+              onChange={handleChange} 
+              className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 border transition-all" 
+              placeholder="Complete residential address (Required)"
+            ></textarea>
+            <p className="text-[11px] text-stone-400 mt-1">Street, Area, City, State, Pincode.</p>
           </div>
         </div>
         )}
@@ -1933,7 +2126,7 @@ export default function Profile() {
         {/* Partner Preferences */}
         {(!editSection || editSection === 'preferences') && (
         <div id="preferences">
-          <h2 className="text-xl font-serif font-bold text-maroon mb-4 border-b-2 border-saffron/20 pb-2">Partner Preferences (Optional)</h2>
+          <h2 className="text-xl font-serif font-bold text-maroon mb-4 border-b-2 border-saffron/20 pb-2">Partner Preferences</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
             <div>
               <label className="block text-sm font-bold text-stone-700 mb-1">Preferred Birth Year (e.g. 1998)</label>
@@ -1950,31 +2143,66 @@ export default function Profile() {
               <p className="text-xs text-stone-400 mt-1 font-medium">Shows profiles born in this year or later (e.g. 1998 born & younger)</p>
             </div>
             <div>
-              <label className="block text-sm font-bold text-stone-700 mb-1">Preferred Education</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-sm font-bold text-stone-700">Preferred Education</label>
+                <button
+                  type="button"
+                  onClick={() => setFormData(prev => ({
+                    ...prev,
+                    partnerPreferences: { ...prev.partnerPreferences, education: 'Any' }
+                  }))}
+                  className="text-[11px] font-bold text-saffron bg-amber-50 hover:bg-amber-100 px-2 py-0.5 rounded-md border border-amber-200 transition-colors"
+                >
+                  Set to "Any" (Match All)
+                </button>
+              </div>
               <input 
                 type="text" 
                 name="pref_education" 
                 value={formData.partnerPreferences.education || ''} 
                 onChange={handleChange} 
                 className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 border transition-all" 
-                placeholder="e.g., Graduate, Engineering, Any" 
+                placeholder="e.g., Any, Graduate, Engineering" 
               />
+              <p className="text-[11px] text-stone-400 mt-1">Select or type <strong>"Any"</strong> to match all education qualifications.</p>
             </div>
             <div className="md:col-span-2">
-              <label className="block text-sm font-bold text-stone-700 mb-1">Preferred Location</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-sm font-bold text-stone-700">Preferred Location</label>
+                <button
+                  type="button"
+                  onClick={() => setFormData(prev => ({
+                    ...prev,
+                    partnerPreferences: { ...prev.partnerPreferences, location: 'Any' }
+                  }))}
+                  className="text-[11px] font-bold text-saffron bg-amber-50 hover:bg-amber-100 px-2 py-0.5 rounded-md border border-amber-200 transition-colors"
+                >
+                  Set to "Any" (Match All)
+                </button>
+              </div>
               <input 
                 type="text" 
                 name="pref_location" 
                 value={formData.partnerPreferences.location || ''} 
                 onChange={handleChange} 
                 className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 border transition-all" 
-                placeholder="e.g., Nashik, Pune, Maharashtra, Any" 
+                placeholder="e.g., Any, Nashik, Pune, Mumbai, Maharashtra" 
               />
+              <p className="text-[11px] text-stone-400 mt-1">Select or type <strong>"Any"</strong> to match profiles across all locations.</p>
             </div>
           </div>
           <div>
-            <label className="block text-sm font-bold text-stone-700 mb-1">Partner Expectations</label>
-            <textarea name="partnerExpectations" rows={3} value={formData.partnerExpectations} onChange={handleChange} className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 border transition-all" placeholder="Describe what you are looking for in a partner..."></textarea>
+            <label className="block text-sm font-bold text-stone-700 mb-1">Partner Expectations *</label>
+            <textarea 
+              required 
+              name="partnerExpectations" 
+              rows={3} 
+              value={formData.partnerExpectations} 
+              onChange={handleChange} 
+              className="w-full border-stone-200 rounded-xl shadow-sm focus:border-saffron focus:ring-saffron p-3 border transition-all" 
+              placeholder="Describe what qualities, education, family values, and lifestyle you expect in a life partner (Required)..."
+            ></textarea>
+            <p className="text-[11px] text-stone-400 mt-1">Mandatory field: Helps eligible candidates understand your preferences.</p>
           </div>
         </div>
         )}
