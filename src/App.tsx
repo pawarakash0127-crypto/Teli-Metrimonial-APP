@@ -109,6 +109,8 @@ export default function App() {
               <Route path="/faq" element={<FAQ />} />
               <Route path="/about" element={<AboutUs />} />
               <Route path="/contact" element={<ContactUs />} />
+              <Route path="/contact-us" element={<ContactUs />} />
+              <Route path="/contactus" element={<ContactUs />} />
             </Routes>
           </main>
           <FloatingMembershipNotification />

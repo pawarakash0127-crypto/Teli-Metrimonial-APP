@@ -1,5 +1,6 @@
 {
   "name": "Nashik Teli Samaj Matrimony",
   "description": "A matrimonial platform for the Nashik Teli Samaj community to find compatible life partners.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -86,15 +86,31 @@ export default function Search() {
 
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [targetProfileForModal, setTargetProfileForModal] = useState<ProfileData | null>(null);
-  const [showMatchesPointer, setShowMatchesPointer] = useState<boolean>(true);
+  const [showMatchesPointer, setShowMatchesPointer] = useState<boolean>(false);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const pageSize = 24;
 
+  // Initialize and check user-specific key for My Matches pointer
   useEffect(() => {
-    if (location.state?.showMatchesPointer) {
-      setShowMatchesPointer(true);
+    if (user?.uid) {
+      const storageKey = `myMatchesSearchIntroSeen_${user.uid}`;
+      const hasSeen = localStorage.getItem(storageKey);
+      if (!hasSeen) {
+        setShowMatchesPointer(true);
+      } else {
+        setShowMatchesPointer(false);
+      }
+    } else {
+      setShowMatchesPointer(false);
     }
-  }, [location.state]);
+  }, [user?.uid]);
+
+  const dismissMatchesPointer = () => {
+    if (user?.uid) {
+      localStorage.setItem(`myMatchesSearchIntroSeen_${user.uid}`, 'true');
+    }
+    setShowMatchesPointer(false);
+  };
 
   useEffect(() => {
     if (!user && activeTab === 'matches') {
@@ -103,25 +119,35 @@ export default function Search() {
     setCurrentPage(1);
   }, [user, activeTab]);
 
+  // Real-time listener for current user's profile
   useEffect(() => {
-    let unsubProfile: (() => void) | null = null;
-    let unsubProfiles: (() => void) | null = null;
-
-    if (user) {
-      unsubProfile = onSnapshot(doc(db, 'profiles', user.uid), (docSnap) => {
-        if (docSnap.exists()) {
-          const uData = docSnap.data() as ProfileData;
-          setMyProfile(uData);
-          if (uData.gender) {
-            const oppGender = getOppositeGenderLabel(uData.gender);
-            setFilters(prev => ({ ...prev, gender: oppGender }));
-          }
-        }
-      }, (err) => {
-        console.warn("Error fetching profile snapshot in Search:", err);
-      });
+    if (!user?.uid) {
+      setMyProfile(null);
+      return;
     }
 
+    const unsubProfile = onSnapshot(doc(db, 'profiles', user.uid), (docSnap) => {
+      if (docSnap.exists()) {
+        const uData = docSnap.data() as ProfileData;
+        setMyProfile(uData);
+      }
+    }, (err) => {
+      console.warn("Error fetching profile snapshot in Search:", err);
+    });
+
+    return () => unsubProfile();
+  }, [user?.uid]);
+
+  // Set default gender filter once opposite gender is known
+  useEffect(() => {
+    if (myProfile?.gender && filters.gender === 'Any') {
+      const oppGender = getOppositeGenderLabel(myProfile.gender);
+      setFilters(prev => ({ ...prev, gender: oppGender }));
+    }
+  }, [myProfile?.gender]);
+
+  // Real-time listener for candidate profiles query
+  useEffect(() => {
     setLoading(true);
 
     // Target query with gender filtering and bound of 150 for 50,000+ profiles
@@ -149,7 +175,7 @@ export default function Search() {
       );
     }
 
-    unsubProfiles = onSnapshot(profilesQuery, (querySnapshot) => {
+    const unsubProfiles = onSnapshot(profilesQuery, (querySnapshot) => {
       const fetchedProfiles: ProfileData[] = [];
       querySnapshot.forEach((docSnap) => {
         const data = docSnap.data() as ProfileData;
@@ -167,11 +193,8 @@ export default function Search() {
       setLoading(false);
     });
 
-    return () => {
-      if (unsubProfile) unsubProfile();
-      if (unsubProfiles) unsubProfiles();
-    };
-  }, [user, filters.gender, activeTab, myProfile?.gender, location.state]);
+    return () => unsubProfiles();
+  }, [user?.uid, filters.gender, activeTab, myProfile?.gender, myProfile?.uid]);
 
   const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -442,7 +465,6 @@ export default function Search() {
                 {HIGHEST_EDUCATION_CATEGORIES.map(cat => (
                   <option key={cat} value={cat}>{cat}</option>
                 ))}
-                <option value="Others">Others</option>
               </select>
 
               {filters.education === 'Others' && (
@@ -501,7 +523,7 @@ export default function Search() {
                 <button 
                   onClick={() => {
                     setActiveTab('matches');
-                    setShowMatchesPointer(false);
+                    dismissMatchesPointer();
                   }}
                   className={`px-5 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 relative ${activeTab === 'matches' ? 'bg-white text-saffron shadow-md' : 'text-stone-500 hover:text-stone-700'}`}
                 >
@@ -517,7 +539,7 @@ export default function Search() {
 
                 {/* Small Popup Pointer pointing directly to My Matches */}
                 {showMatchesPointer && activeTab === 'search' && (
-                  <div className="absolute right-0 top-full mt-3 z-50 w-72 sm:w-80 bg-stone-900 text-white p-4 rounded-2xl shadow-2xl border-2 border-saffron animate-bounce-subtle">
+                  <div className="absolute right-0 top-full mt-3 z-50 w-72 sm:w-80 max-w-[calc(100vw-2rem)] bg-stone-900 text-white p-4 rounded-2xl shadow-2xl border-2 border-saffron animate-bounce-subtle">
                     {/* Triangle Arrow pointing up */}
                     <div className="absolute -top-2 right-8 w-4 h-4 bg-stone-900 border-t-2 border-l-2 border-saffron rotate-45"></div>
                     
@@ -525,13 +547,13 @@ export default function Search() {
                       <div className="p-2 bg-saffron text-white rounded-xl flex-shrink-0 mt-0.5">
                         <Sparkles className="w-5 h-5 text-white" />
                       </div>
-                      <div className="flex-1">
+                      <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between mb-1">
                           <h4 className="font-serif font-bold text-sm text-amber-300">
                             Discover "My Matches"!
                           </h4>
                           <button 
-                            onClick={() => setShowMatchesPointer(false)}
+                            onClick={dismissMatchesPointer}
                             className="text-stone-400 hover:text-white p-1 rounded-lg transition-colors"
                             aria-label="Close tooltip"
                           >
@@ -544,7 +566,7 @@ export default function Search() {
                         <button
                           onClick={() => {
                             setActiveTab('matches');
-                            setShowMatchesPointer(false);
+                            dismissMatchesPointer();
                           }}
                           className="w-full bg-saffron hover:bg-orange-600 text-white text-xs font-bold py-2 rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5 active:scale-95"
                         >

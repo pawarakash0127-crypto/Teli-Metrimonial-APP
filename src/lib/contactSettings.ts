@@ -49,34 +49,48 @@ export const DEFAULT_CONTACT_SETTINGS: ContactUsSettings = {
   pincode: '422003',
   googleMapsUrl: 'https://maps.google.com/?q=Panchavati+Nashik+Maharashtra+422003',
 
-  facebookUrl: '',
+  facebookUrl: 'https://facebook.com/nashiktelisamaj',
   showFacebook: true,
-  instagramUrl: '',
+  instagramUrl: 'https://instagram.com/nashiktelisamaj',
   showInstagram: true,
-  youtubeUrl: '',
+  youtubeUrl: 'https://youtube.com/@nashiktelisamaj',
   showYoutube: true,
-  linkedinUrl: '',
+  linkedinUrl: 'https://linkedin.com/company/nashiktelisamaj',
   showLinkedin: true,
-  twitterUrl: '',
+  twitterUrl: 'https://x.com/nashiktelisamaj',
   showTwitter: true,
 
   supportNotice: 'Have questions regarding profile registration, verification, or community events? Send us a message or connect with our support team.'
 };
 
 /**
- * Validates whether a given string is a well-formed http or https URL.
+ * Normalizes and validates whether a given string is a well-formed http or https URL.
+ * Automatically adds https:// if protocol is omitted (e.g. facebook.com/page -> https://facebook.com/page).
  * Rejects javascript: URLs, empty strings, and malformed strings.
  */
-export function isValidHttpUrl(urlString?: string): boolean {
-  if (!urlString || typeof urlString !== 'string') return false;
-  const trimmed = urlString.trim();
-  if (!trimmed) return false;
+export function normalizeHttpUrl(urlString?: string): string {
+  if (!urlString || typeof urlString !== 'string') return '';
+  let trimmed = urlString.trim();
+  if (!trimmed) return '';
+  
+  // Auto-prepend https:// if protocol is missing
+  if (!/^https?:\/\//i.test(trimmed)) {
+    trimmed = `https://${trimmed}`;
+  }
+  
   try {
     const url = new URL(trimmed);
-    return url.protocol === 'http:' || url.protocol === 'https:';
+    if (url.protocol === 'http:' || url.protocol === 'https:') {
+      return url.href;
+    }
+    return '';
   } catch {
-    return false;
+    return '';
   }
+}
+
+export function isValidHttpUrl(urlString?: string): boolean {
+  return !!normalizeHttpUrl(urlString);
 }
 
 export interface ActiveSocialPlatform {
@@ -87,22 +101,24 @@ export interface ActiveSocialPlatform {
 
 /**
  * Returns strictly valid, enabled social media platforms.
- * Hides any platform with empty URL, disabled toggle, or invalid URL scheme.
+ * Hides any platform with empty URL, disabled toggle (show !== true / false), or invalid URL scheme.
  */
 export function getActiveSocialPlatforms(settings: ContactUsSettings): ActiveSocialPlatform[] {
-  const platforms: { name: string; url?: string; show?: boolean; platformKey: ActiveSocialPlatform['platformKey'] }[] = [
-    { name: 'Facebook', url: settings.facebookUrl, show: settings.showFacebook !== false, platformKey: 'facebook' },
-    { name: 'Instagram', url: settings.instagramUrl, show: settings.showInstagram !== false, platformKey: 'instagram' },
-    { name: 'YouTube', url: settings.youtubeUrl, show: settings.showYoutube !== false, platformKey: 'youtube' },
-    { name: 'LinkedIn', url: settings.linkedinUrl, show: settings.showLinkedin !== false, platformKey: 'linkedin' },
-    { name: 'Twitter / X', url: settings.twitterUrl, show: settings.showTwitter !== false, platformKey: 'twitter' },
+  const isEnabled = (val: any) => val !== false && val !== 'false' && val !== 0;
+
+  const platforms: { name: string; url?: string; show: boolean; platformKey: ActiveSocialPlatform['platformKey'] }[] = [
+    { name: 'Facebook', url: settings.facebookUrl, show: isEnabled(settings.showFacebook), platformKey: 'facebook' },
+    { name: 'Instagram', url: settings.instagramUrl, show: isEnabled(settings.showInstagram), platformKey: 'instagram' },
+    { name: 'YouTube', url: settings.youtubeUrl, show: isEnabled(settings.showYoutube), platformKey: 'youtube' },
+    { name: 'LinkedIn', url: settings.linkedinUrl, show: isEnabled(settings.showLinkedin), platformKey: 'linkedin' },
+    { name: 'Twitter / X', url: settings.twitterUrl, show: isEnabled(settings.showTwitter), platformKey: 'twitter' },
   ];
 
   return platforms
     .filter(p => p.show && isValidHttpUrl(p.url))
     .map(p => ({
       name: p.name,
-      url: (p.url || '').trim(),
+      url: normalizeHttpUrl(p.url),
       platformKey: p.platformKey
     }));
 }

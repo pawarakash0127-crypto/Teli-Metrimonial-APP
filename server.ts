@@ -1,13 +1,54 @@
 import express from 'express';
 import path from 'path';
 import nodemailer from 'nodemailer';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import { createServer as createViteServer } from 'vite';
 import { generateWelcomeEmailHtml, formatMembershipDates } from './src/lib/welcomeEmailTemplate.js';
 
 const app = express();
 const PORT = 3000;
 
-app.use(express.json());
+// Security HTTP Headers (configured safely for SPA and embedded assets)
+app.use(
+  helmet({
+    contentSecurityPolicy: false, // Vite SPA handles inline styles & script chunks
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: { policy: "cross-origin" }
+  })
+);
+
+app.use(express.json({ limit: '1mb' }));
+
+// Rate Limiters
+const generalApiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 300,
+  message: { success: false, error: 'Too many requests from this IP, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const emailRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20, // 20 emails per 15 minutes per IP
+  message: { success: false, error: 'Email dispatch rate limit reached. Please try again after 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const paymentRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 50,
+  message: { success: false, error: 'Payment request limit reached. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.use('/api/', generalApiLimiter);
+app.use('/api/welcome-email/send', emailRateLimiter);
+app.use('/api/welcome-email/test', emailRateLimiter);
+app.use('/api/payments/', paymentRateLimiter);
 
 // In-memory log of recent email dispatches for developer debugging/preview
 const emailLogs: Array<{

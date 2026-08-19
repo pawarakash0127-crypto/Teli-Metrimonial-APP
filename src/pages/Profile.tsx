@@ -1852,7 +1852,7 @@ export default function Profile() {
                 ))}
               </select>
             </div>
-            {formData.highestEducation === 'Others' && (
+            {(formData.highestEducation === 'Others' || formData.highestEducation === 'Other') && (
               <div>
                 <label className="block text-sm font-bold text-stone-700 mb-1">Custom Education Degree *</label>
                 <input 
